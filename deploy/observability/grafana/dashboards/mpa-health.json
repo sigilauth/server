@@ -1,0 +1,83 @@
+{
+  "dashboard": {
+    "title": "Sigil MPA Health",
+    "tags": ["sigil", "mpa"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "MPA Completion Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(sigil_mpa_requests_total{status=\"approved\"}[1h])) / sum(rate(sigil_mpa_requests_total{status!=\" pending\"}[1h]))",
+            "legendFormat": "Completion Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 0.80, "color": "yellow"},
+                {"value": 0.90, "color": "green"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "MPA Duration p95",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(sigil_mpa_duration_seconds_bucket[1h]))",
+            "legendFormat": "p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 180, "color": "yellow"},
+                {"value": 300, "color": "red"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "MPA by Outcome (24h)",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (status) (increase(sigil_mpa_requests_total[24h]))"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "MPA Requests Over Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum by (status) (rate(sigil_mpa_requests_total[5m]))",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4}
+      }
+    ]
+  }
+}

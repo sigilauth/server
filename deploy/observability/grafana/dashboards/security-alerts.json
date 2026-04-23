@@ -1,0 +1,66 @@
+{
+  "dashboard": {
+    "title": "Sigil Security Alerts",
+    "tags": ["sigil", "security"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Signature Failure Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(sigil_challenges_total{status=\"signature_failed\"}[5m])) / sum(rate(sigil_challenges_total{status=\"created\"}[5m]))",
+            "legendFormat": "Failure Rate"
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"type": "gt", "params": [0.01]},
+              "query": {"params": ["A", "5m", "now"]}
+            }
+          ],
+          "name": "Signature failure spike"
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Replay Attempts",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(sigil_challenges_total{status=\"replay_blocked\"}[5m])",
+            "legendFormat": "Replays/s"
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"type": "gt", "params": [0]},
+              "query": {"params": ["A", "5m", "now"]}
+            }
+          ],
+          "name": "Replay attack detected"
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Push Delivery Degradation",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(relay_push_delivery_success_total[5m])) / sum(rate(relay_push_total{status=\"sent\"}[5m]))",
+            "legendFormat": "Success Rate"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+      }
+    ]
+  }
+}

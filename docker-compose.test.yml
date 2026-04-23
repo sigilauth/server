@@ -1,0 +1,48 @@
+# Test Environment Overrides
+#
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+#        OR: make test
+#
+# Changes from base:
+# - APNs/FCM mocked (no real credentials needed)
+# - Test harness enabled
+# - Ephemeral volumes (data doesn't persist)
+# - Relaxed attestation requirements
+
+version: '3.8'
+
+services:
+  relay:
+    environment:
+      # Mock push providers (no real credentials)
+      APNS_MOCK: "true"
+      FCM_MOCK: "true"
+
+      # Logging
+      LOG_LEVEL: debug
+
+  sigil:
+    environment:
+      # Test mode
+      SIGIL_MODE: test
+
+      # Mnemonic for testing (DO NOT use in production)
+      SIGIL_MNEMONIC: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+
+      # API key for testing
+      API_KEY: "test_key_12345"
+
+      # Disable attestation requirement for testing
+      SIGIL_ATTESTATION_REQUIRED: "false"
+      SIGIL_ALLOW_EMULATORS: "true"
+
+      # Logging
+      LOG_LEVEL: debug
+
+  test-harness:
+    profiles: []  # Remove 'test' profile requirement — always start in test mode
+
+  postgres:
+    # Use tmpfs for faster test execution (data doesn't persist)
+    tmpfs:
+      - /var/lib/postgresql/data

@@ -1,0 +1,177 @@
+version: '3.8'
+
+# Sigil Auth MVP — Base Docker Compose Stack
+#
+# Services:
+# - sigil:        Stateless Go auth server (mnemonic-derived keypair)
+# - relay:        Push relay (APNs + FCM, fingerprint→push_token registry)
+# - postgres:     Relay database (fingerprint→push_token mapping)
+# - test-harness: E2E test simulator (optional, for B16)
+#
+# Network: Internal bridge (postgres NOT exposed to host)
+# TLS: Self-signed on first boot (ACME path documented)
+#
+# Usage:
+#   make up         # Start stack
+#   make down       # Stop stack
+#   make test       # Run with test overrides
+#   make logs       # Tail logs
+#
+# Overrides:
+#   docker-compose.test.yml  # APNS_MOCK + FCM_MOCK
+#   docker-compose.prod.yml  # Resource limits + healthchecks + named volumes
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sigil-postgres
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay_dev_password}
+      POSTGRES_DB: relay
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - sigil-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  relay:
+    build:
+      context: ../relay
+      dockerfile: Dockerfile
+    image: sigilauth/relay:latest
+    container_name: sigil-relay
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://relay:${POSTGRES_PASSWORD:-relay_dev_password}@postgres:5432/relay
+
+      # Push providers (overridden in test/prod)
+      APNS_KEY_PATH: ${APNS_KEY_PATH:-/dev/null}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-/dev/null}
+
+      # Server
+      RELAY_PORT: 8080
+      RELAY_HOST: 0.0.0.0
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+    ports:
+      - "${RELAY_PORT:-8080}:8080"
+    networks:
+      - sigil-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  sigil:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sigilauth/server:latest
+    container_name: sigil-server
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      # Mode
+      SIGIL_MODE: ${SIGIL_MODE:-operational}
+
+      # Mnemonic (for dev: env var; for prod: file or Key Vault)
+      SIGIL_MNEMONIC: ${SIGIL_MNEMONIC:-}
+      SIGIL_MNEMONIC_PATH: ${SIGIL_MNEMONIC_PATH:-}
+
+      # Relay
+      RELAY_URL: http://relay:8080
+
+      # API
+      API_KEY: ${API_KEY:-}
+
+      # Webhooks
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+
+      # TLS
+      TLS_CERT_PATH: ${TLS_CERT_PATH:-/var/lib/sigil/tls/cert.pem}
+      TLS_KEY_PATH: ${TLS_KEY_PATH:-/var/lib/sigil/tls/key.pem}
+      TLS_AUTO_GENERATE: ${TLS_AUTO_GENERATE:-true}
+
+      # Server
+      SIGIL_PORT: 8443
+      SIGIL_HOST: 0.0.0.0
+
+      # Telemetry (Knox §6 + Quinn §5)
+      SIGIL_TELEMETRY: ${SIGIL_TELEMETRY:-full}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+
+      # Feature flags (Sol §4)
+      SIGIL_ENABLE_RELAY: ${SIGIL_ENABLE_RELAY:-true}
+      SIGIL_ENABLE_MPA: ${SIGIL_ENABLE_MPA:-true}
+      SIGIL_ENABLE_SECURE_DECRYPT: ${SIGIL_ENABLE_SECURE_DECRYPT:-true}
+      SIGIL_ENABLE_MNEMONIC_GEN: ${SIGIL_ENABLE_MNEMONIC_GEN:-true}
+      SIGIL_ATTESTATION_REQUIRED: ${SIGIL_ATTESTATION_REQUIRED:-false}
+      SIGIL_ALLOW_EMULATORS: ${SIGIL_ALLOW_EMULATORS:-false}
+    volumes:
+      - sigil-data:/var/lib/sigil
+    ports:
+      - "${SIGIL_PORT:-8443}:8443"
+    networks:
+      - sigil-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:8443/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Test harness (for B16 E2E tests)
+  # Simulates devices: generates keypairs, registers, signs responses
+  # Disabled by default (enable in docker-compose.test.yml)
+  test-harness:
+    build:
+      context: ./test/harness
+      dockerfile: Dockerfile
+    image: sigilauth/test-harness:latest
+    container_name: sigil-test-harness
+    depends_on:
+      sigil:
+        condition: service_healthy
+    environment:
+      SIGIL_URL: https://sigil:8443
+      RELAY_URL: http://relay:8080
+      API_KEY: ${API_KEY:-test_key_12345}
+      TLS_SKIP_VERIFY: "true"  # Self-signed cert in dev
+    networks:
+      - sigil-internal
+    profiles:
+      - test  # Only start with --profile test
+    command: ["--help"]  # Default: show help, don't run tests
+
+networks:
+  sigil-internal:
+    driver: bridge
+    name: sigil-network
+
+volumes:
+  postgres-data:
+    name: sigil-postgres-data
+  sigil-data:
+    name: sigil-server-data

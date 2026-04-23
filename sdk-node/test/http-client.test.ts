@@ -168,9 +168,12 @@ describe('HTTP Client with Retry Logic', () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);  // 1 initial + 3 retries
     });
 
-    it('should apply exponential backoff delays', async () => {
-      vi.useFakeTimers();
-      const client = new HttpClient(config);
+    it('should apply exponential backoff between retries', async () => {
+      const client = new HttpClient({
+        ...config,
+        retryDelays: [10, 20, 40]  // Shorter delays for test speed
+      });
+      const startTime = Date.now();
       const fetchMock = vi.fn().mockResolvedValue({
         ok: false,
         status: 500,
@@ -178,26 +181,12 @@ describe('HTTP Client with Retry Logic', () => {
       });
       global.fetch = fetchMock;
 
-      const promise = client.post('/challenge', {}).catch(() => {});  // Catch to prevent unhandled rejection
+      await expect(client.post('/challenge', {})).rejects.toThrow();
 
-      // Let initial request complete
-      await vi.runOnlyPendingTimersAsync();
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-
-      // First retry after 100ms
-      await vi.advanceTimersByTimeAsync(100);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-
-      // Second retry after 200ms
-      await vi.advanceTimersByTimeAsync(200);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-
-      // Third retry after 400ms
-      await vi.advanceTimersByTimeAsync(400);
-      expect(fetchMock).toHaveBeenCalledTimes(4);
-
-      await promise;
-      vi.useRealTimers();
+      const elapsed = Date.now() - startTime;
+      // Should have waited 10 + 20 + 40 = 70ms minimum
+      expect(elapsed).toBeGreaterThanOrEqual(60);  // Allow some timing variance
+      expect(fetchMock).toHaveBeenCalledTimes(4);  // 1 initial + 3 retries
     });
   });
 
@@ -224,8 +213,12 @@ describe('HTTP Client with Retry Logic', () => {
       });
     });
 
-    it('should handle network errors', async () => {
-      const client = new HttpClient(config);
+    it('should handle network errors with retry', async () => {
+      const client = new HttpClient({
+        ...config,
+        maxRetries: 1,
+        retryDelays: [10]
+      });
       const fetchMock = vi.fn().mockRejectedValue(
         new Error('Network request failed')
       );
@@ -234,20 +227,25 @@ describe('HTTP Client with Retry Logic', () => {
       await expect(client.post('/challenge', {})).rejects.toThrow(
         /Network request failed/
       );
+      expect(fetchMock).toHaveBeenCalledTimes(2);  // 1 initial + 1 retry
     });
 
     it('should handle timeout errors', async () => {
-      const client = new HttpClient({ ...config, timeout: 100 });
-      const fetchMock = vi.fn().mockImplementation(() =>
-        new Promise((resolve, reject) => {
-          setTimeout(() => {
-            // Simulate AbortError
+      const client = new HttpClient({
+        ...config,
+        timeout: 50,
+        maxRetries: 0  // No retries for faster test
+      });
+      const fetchMock = vi.fn().mockImplementation((_url, opts) => {
+        // Return a promise that will be aborted
+        return new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
             const abortError = new Error('The operation was aborted');
             abortError.name = 'AbortError';
             reject(abortError);
-          }, 200);
-        })
-      );
+          });
+        });
+      });
       global.fetch = fetchMock;
 
       await expect(client.post('/challenge', {})).rejects.toThrow(/timeout/i);

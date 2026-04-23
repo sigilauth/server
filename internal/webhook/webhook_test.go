@@ -40,6 +40,7 @@ func TestDeliverSuccess(t *testing.T) {
 
 	client := webhook.NewClient(apiKey)
 	client.DisableSSRFForTesting()
+	client.DisableTLSVerificationForTesting()
 	ctx := context.Background()
 
 	payload := []byte(`{"event":"test","data":"value"}`)
@@ -101,6 +102,7 @@ func TestDeliverRetries(t *testing.T) {
 
 	client := webhook.NewClient("test-key")
 	client.DisableSSRFForTesting()
+	client.DisableTLSVerificationForTesting()
 	client.SetFastRetryForTesting()
 	ctx := context.Background()
 
@@ -120,6 +122,7 @@ func TestDeliverRetriesExhausted(t *testing.T) {
 
 	client := webhook.NewClient("test-key")
 	client.DisableSSRFForTesting()
+	client.DisableTLSVerificationForTesting()
 	client.SetFastRetryForTesting()
 	ctx := context.Background()
 
@@ -138,6 +141,7 @@ func TestDeliverTimeout(t *testing.T) {
 
 	client := webhook.NewClient("test-key")
 	client.DisableSSRFForTesting()
+	client.DisableTLSVerificationForTesting()
 	client.SetFastRetryForTesting()
 	ctx := context.Background()
 
@@ -246,6 +250,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 	client := webhook.NewClient("test-key")
 	client.DisableSSRFForTesting()
+	client.DisableTLSVerificationForTesting()
 	client.SetFastRetryForTesting()
 	ctx := context.Background()
 

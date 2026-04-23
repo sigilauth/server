@@ -41,6 +41,7 @@ func Sign(privateKey *ecdsa.PrivateKey, message []byte) ([]byte, error) {
 // Verify checks an ECDSA signature against a message and public key.
 //
 // Signature must be exactly 64 bytes (r || s). Message is hashed with SHA-256.
+// Rejects high-S signatures per BIP-62 (SIG-2026-002) to prevent signature malleability.
 func Verify(publicKey *ecdsa.PublicKey, message, signature []byte) error {
 	if len(signature) != 64 {
 		return fmt.Errorf("signature must be 64 bytes, got %d", len(signature))
@@ -50,6 +51,14 @@ func Verify(publicKey *ecdsa.PublicKey, message, signature []byte) error {
 
 	r := new(big.Int).SetBytes(signature[0:32])
 	s := new(big.Int).SetBytes(signature[32:64])
+
+	// BIP-62: Reject high-S signatures (SIG-2026-002)
+	// Malicious signatures can have s > order/2, which creates signature malleability
+	curve := publicKey.Curve
+	halfOrder := HalfOrder(curve)
+	if s.Cmp(halfOrder) > 0 {
+		return fmt.Errorf("signature rejected: high-S value violates BIP-62 (s > order/2)")
+	}
 
 	if !ecdsa.Verify(publicKey, hash[:], r, s) {
 		return fmt.Errorf("invalid signature")

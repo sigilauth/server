@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for TDD audit
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Coverage check
+        run: |
+          # Server coverage thresholds: 90% line / 85% branch (Maren §10)
+          go tool cover -func=coverage.out | \
+            awk '/^total:/ {
+              cov = substr($3, 1, length($3)-1);
+              if (cov < 90.0) {
+                print "Coverage " cov "% below threshold 90%";
+                exit 1;
+              }
+              print "Coverage " cov "% meets threshold";
+            }'
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: server
+          fail_ci_if_error: false
+
+  tdd-audit:
+    name: TDD Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history
+
+      - name: Fetch base branch
+        run: |
+          git fetch origin main:main || true
+
+      - name: Run TDD audit
+        run: bash scripts/tdd-audit.sh origin/main
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'sigilauth-server'
+          path: '.'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+
+      - name: Upload OWASP report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-report
+          path: reports/
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+          SIGIL_MODE: test
+        run: go test -v -tags=integration ./test/integration/...
+
+  build:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Build
+        run: |
+          go build -v -o sigil-server ./cmd/sigil
+
+      - name: Verify binary
+        run: |
+          ./sigil-server --version || echo "Binary built (--version not implemented yet)"
+
+  all-checks:
+    name: All Checks Passed
+    needs: [lint, test, tdd-audit, security, integration, build]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
+             [[ "${{ needs.tdd-audit.result }}" != "success" ]] || \
+             [[ "${{ needs.security.result }}" != "success" ]] || \
+             [[ "${{ needs.integration.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "One or more checks failed"
+            exit 1
+          fi
+          echo "All checks passed!"

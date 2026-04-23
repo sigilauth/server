@@ -1,0 +1,33 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+dist/
+build/
+
+# Go
+/bin/
+/vendor/
+
+# Docker
+.docker/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Test
+coverage/
+.nyc_output/
+
+# TLS
+*.pem
+*.key
+*.crt
+!testdata/

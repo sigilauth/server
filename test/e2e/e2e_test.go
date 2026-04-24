@@ -55,7 +55,7 @@ var _ = require.New
 
 // getBaseURL returns the base URL for the Sigil server
 func getBaseURL() string {
-	if url := os.Getenv("SIGIL_BASE_URL"); url != "" {
+	if url := os.Getenv("SIGIL_SERVER_URL"); url != "" {
 		return url
 	}
 	return "http://localhost:8443"

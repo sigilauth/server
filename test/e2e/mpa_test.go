@@ -39,19 +39,19 @@ func TestMPA2of3(t *testing.T) {
 		"groups": []map[string]interface{}{
 			{
 				"members": []map[string]interface{}{
-					{"fingerprint": sarahiPhone.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(sarahiPhone.PublicKeyCompressed)},
-					{"fingerprint": sarahiPad.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(sarahiPad.PublicKeyCompressed)},
+					{"fingerprint": sarahiPhone.Fingerprint, "device_public_key": sarahiPhone.PublicKeyCompressed},
+					{"fingerprint": sarahiPad.Fingerprint, "device_public_key": sarahiPad.PublicKeyCompressed},
 				},
 			},
 			{
 				"members": []map[string]interface{}{
-					{"fingerprint": mikePixel.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(mikePixel.PublicKeyCompressed)},
+					{"fingerprint": mikePixel.Fingerprint, "device_public_key": mikePixel.PublicKeyCompressed},
 				},
 			},
 			{
 				"members": []map[string]interface{}{
-					{"fingerprint": damonMacBook.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(damonMacBook.PublicKeyCompressed)},
-					{"fingerprint": damonYubiKey.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(damonYubiKey.PublicKeyCompressed)},
+					{"fingerprint": damonMacBook.Fingerprint, "device_public_key": damonMacBook.PublicKeyCompressed},
+					{"fingerprint": damonYubiKey.Fingerprint, "device_public_key": damonYubiKey.PublicKeyCompressed},
 				},
 			},
 		},

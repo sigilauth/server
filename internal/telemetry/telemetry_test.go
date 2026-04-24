@@ -216,3 +216,62 @@ func TestRecordDuration(t *testing.T) {
 	body := w.Body.String()
 	assert.Contains(t, body, "sigil_challenge_verify_duration", "should have duration histogram")
 }
+
+func TestIncrementMPARequests(t *testing.T) {
+	tel := telemetry.New(telemetry.Config{
+		ServiceName: "sigil-test",
+		Enabled:     true,
+	})
+
+	// Increment MPA request counter
+	tel.IncrementMPARequests("destructive_action")
+	tel.IncrementMPARequests("destructive_action")
+	tel.IncrementMPARequests("sensitive_read")
+
+	// Get metrics handler
+	handler := tel.MetricsHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	assert.Contains(t, body, "sigil_mpa_requests_total", "should have MPA request counter")
+	assert.Contains(t, body, `action_type="destructive_action"`, "should have action_type label")
+}
+
+func TestSpanSetAttributeAllTypes(t *testing.T) {
+	tel := telemetry.New(telemetry.Config{
+		ServiceName: "sigil-test",
+		Enabled:     true,
+	})
+
+	ctx := context.Background()
+	ctx, span := tel.StartSpan(ctx, "test.all_types")
+	defer span.End()
+
+	// Test all attribute types to achieve full coverage
+	span.SetAttribute("string_attr", "value")
+	span.SetAttribute("int_attr", 42)
+	span.SetAttribute("int64_attr", int64(9876543210))
+	span.SetAttribute("bool_attr", true)
+	span.SetAttribute("float64_attr", 3.14159)
+	span.SetAttribute("unsupported_attr", []string{"unsupported"}) // Should convert to "unsupported"
+
+	// All SetAttribute calls should complete without panic
+	assert.NotNil(t, span)
+}
+
+func TestRecordDurationWhenDisabled(t *testing.T) {
+	os.Setenv("SIGIL_TELEMETRY", "none")
+	defer os.Unsetenv("SIGIL_TELEMETRY")
+
+	tel := telemetry.New(telemetry.Config{
+		ServiceName: "sigil-test",
+	})
+
+	// Recording duration when disabled should not panic
+	tel.RecordChallengeVerifyDuration(50.0)
+	tel.RecordMPARequestDuration(200.0)
+
+	assert.False(t, tel.IsEnabled())
+}

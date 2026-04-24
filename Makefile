@@ -125,6 +125,34 @@ rebuild:
 	@echo "Rebuilding Docker images from scratch..."
 	$(COMPOSE) $(COMPOSE_FILES) build --no-cache
 
+## observability: Start stack with observability (Prometheus, Grafana, Loki, etc.)
+observability:
+	@echo "Starting Sigil stack with observability..."
+	$(COMPOSE) -f docker-compose.yml -f deploy/observability/docker-compose.observability.yml up -d
+	@sleep 10
+	@$(MAKE) health-obs
+
+## health-obs: Check observability stack health
+health-obs:
+	@echo "\nChecking observability stack health..."
+	@echo "Prometheus:"
+	@curl -s -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:9090/-/healthy || echo "  ❌ Prometheus unhealthy"
+	@echo "\nGrafana:"
+	@curl -s -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:3000/api/health || echo "  ❌ Grafana unhealthy"
+	@echo "\nLoki:"
+	@curl -s -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:3100/ready || echo "  ❌ Loki unhealthy"
+	@echo "\nTempo:"
+	@curl -s -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:3200/ready || echo "  ❌ Tempo unhealthy"
+	@echo ""
+	@echo "Access URLs:"
+	@echo "  Grafana:    http://localhost:3000"
+	@echo "  Prometheus: http://localhost:9090"
+
+## down-obs: Stop observability stack
+down-obs:
+	@echo "Stopping observability stack..."
+	$(COMPOSE) -f docker-compose.yml -f deploy/observability/docker-compose.observability.yml down
+
 ## help: Show this help message
 help:
 	@echo "Sigil Auth — Docker Compose Makefile"

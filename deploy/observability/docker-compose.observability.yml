@@ -1,0 +1,118 @@
+# Observability Stack Compose Override
+#
+# Adds Prometheus, Grafana, Loki, Promtail, OTel Collector, Tempo
+# to the base docker-compose.yml stack.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f deploy/observability/docker-compose.observability.yml up
+
+version: '3.9'
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: sigil-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    networks:
+      - sigil-internal
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: sigil-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://grafana.sigilauth.com
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - sigil-internal
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: sigil-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./deploy/observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    networks:
+      - sigil-internal
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: sigil-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./deploy/observability/loki/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - sigil-internal
+    depends_on:
+      - loki
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.91.0
+    container_name: sigil-otel
+    restart: unless-stopped
+    command: --config=/etc/otelcol/collector.yml
+    environment:
+      - DEPLOYMENT_ENV=${DEPLOYMENT_ENV:-development}
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+    volumes:
+      - ./deploy/observability/otel/collector.yml:/etc/otelcol/collector.yml:ro
+    networks:
+      - sigil-internal
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:2.3.1
+    container_name: sigil-tempo
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/tempo/tempo.yml"
+    ports:
+      - "3200:3200"  # Tempo HTTP
+      - "4317"       # OTLP gRPC receiver
+    volumes:
+      - ./deploy/observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/tmp/tempo
+    networks:
+      - sigil-internal
+
+networks:
+  sigil-internal:
+    external: true
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  tempo-data:

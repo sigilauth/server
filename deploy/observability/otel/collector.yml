@@ -1,0 +1,63 @@
+# OpenTelemetry Collector Configuration for Sigil Auth
+#
+# Receives traces from sigil and relay via OTLP
+# Exports to Tempo for distributed tracing
+#
+# Usage:
+#   docker run -d \
+#     -p 4317:4317 -p 4318:4318 \
+#     -v $(pwd)/deploy/observability/otel:/etc/otelcol:ro \
+#     --network sigil-network \
+#     otel/opentelemetry-collector
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch spans for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: service.namespace
+        value: sigil-auth
+        action: upsert
+      - key: deployment.environment
+        value: ${DEPLOYMENT_ENV}
+        action: upsert
+
+  # Sample traces if volume too high (optional)
+  probabilistic_sampler:
+    sampling_percentage: 100  # 100% in dev, reduce in prod
+
+exporters:
+  # Export to Tempo
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Export to stdout for debugging
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource, probabilistic_sampler]
+      exporters: [otlp/tempo, logging]
+
+  telemetry:
+    logs:
+      level: info

@@ -4,7 +4,7 @@
 # Stage 2: Runtime (minimal Alpine image)
 
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 

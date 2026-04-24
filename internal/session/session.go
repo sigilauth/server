@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -124,9 +125,18 @@ func (s *Store) CreateChallenge(ctx context.Context, req ChallengeRequest) (*Cha
 		Consumed:           false,
 	}
 
+	// INSTRUMENTATION: Log key length at storage
+	log.Printf("[TRACE] CreateChallenge storing key: challenge_id=%s, key_len=%d, key_hex=%x",
+		challengeID, len(challenge.DevicePublicKey), challenge.DevicePublicKey)
+
 	s.mu.Lock()
 	s.challenges[challengeID] = challenge
 	s.mu.Unlock()
+
+	// INSTRUMENTATION: Verify it's still correct after storage
+	storedChallenge := s.challenges[challengeID]
+	log.Printf("[TRACE] CreateChallenge after store: challenge_id=%s, stored_key_len=%d",
+		challengeID, len(storedChallenge.DevicePublicKey))
 
 	return challenge, nil
 }
@@ -168,6 +178,10 @@ func (s *Store) VerifyChallenge(ctx context.Context, req VerifyRequest) error {
 		return err
 	}
 
+	// INSTRUMENTATION: Log key length at retrieval
+	log.Printf("[TRACE] VerifyChallenge retrieved: challenge_id=%s, key_len=%d, key_hex=%x",
+		req.ChallengeID, len(challenge.DevicePublicKey), challenge.DevicePublicKey)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -180,9 +194,15 @@ func (s *Store) VerifyChallenge(ctx context.Context, req VerifyRequest) error {
 		return fmt.Errorf("fingerprint mismatch")
 	}
 
+	// INSTRUMENTATION: Log key before decompression
+	log.Printf("[TRACE] VerifyChallenge before decompress: key_len=%d, key_hex=%x",
+		len(challenge.DevicePublicKey), challenge.DevicePublicKey)
+
 	// Use stored device public key for signature verification
 	devicePubKey, err := crypto.DecompressPublicKey(challenge.DevicePublicKey)
 	if err != nil {
+		log.Printf("[TRACE] VerifyChallenge decompress FAILED: key_len=%d, error=%v",
+			len(challenge.DevicePublicKey), err)
 		return fmt.Errorf("invalid stored device public key: %w", err)
 	}
 

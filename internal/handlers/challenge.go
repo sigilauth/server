@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -50,6 +51,10 @@ func (h *Handler) CreateChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_PUBLIC_KEY", "Device public key must be base64")
 		return
 	}
+
+	// INSTRUMENTATION: Log decoded key
+	log.Printf("[TRACE] CreateChallenge handler decoded key: len=%d, hex=%x",
+		len(devicePubKeyBytes), devicePubKeyBytes)
 
 	// Validate public key format
 	if len(devicePubKeyBytes) != 33 {
@@ -118,9 +123,13 @@ func (h *Handler) Respond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// INSTRUMENTATION: Log respond request
+	log.Printf("[TRACE] Respond handler called: challenge_id=%s, fingerprint=%s",
+		req.ChallengeID, req.Fingerprint)
+
 	// Check if challenge exists and is not expired BEFORE validating signature format
 	// This ensures expired challenges return CHALLENGE_EXPIRED, not INVALID_SIGNATURE
-	_, err := h.sessionStore.GetChallenge(r.Context(), req.ChallengeID)
+	challenge, err := h.sessionStore.GetChallenge(r.Context(), req.ChallengeID)
 	if err != nil {
 		// GetChallenge returns "challenge not found" or "challenge expired"
 		errMsg := err.Error()
@@ -131,6 +140,10 @@ func (h *Handler) Respond(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", errMsg)
 		return
 	}
+
+	// INSTRUMENTATION: Log challenge key from GetChallenge
+	log.Printf("[TRACE] Respond handler GetChallenge returned: key_len=%d, key_hex=%x",
+		len(challenge.DevicePublicKey), challenge.DevicePublicKey)
 
 	// Now validate signature format
 	signatureBytes, err := base64.StdEncoding.DecodeString(req.Signature)

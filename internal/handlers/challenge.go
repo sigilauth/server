@@ -20,6 +20,8 @@ type ChallengeRequest struct {
 // ChallengeResponse matches OpenAPI schema
 type ChallengeResponse struct {
 	ChallengeID        string   `json:"challenge_id"`
+	ChallengeBytes     string   `json:"challenge_bytes"`      // base64(32 bytes)
+	ServerSignature    string   `json:"server_signature"`     // base64(64 bytes)
 	Pictogram          []string `json:"pictogram"`
 	PictogramSpeakable string   `json:"pictogram_speakable"`
 	ExpiresAt          string   `json:"expires_at"`
@@ -86,6 +88,8 @@ func (h *Handler) CreateChallenge(w http.ResponseWriter, r *http.Request) {
 
 	resp := ChallengeResponse{
 		ChallengeID:        challenge.ChallengeID,
+		ChallengeBytes:     base64.StdEncoding.EncodeToString(challenge.ChallengeBytes),
+		ServerSignature:    base64.StdEncoding.EncodeToString(challenge.ServerSignature),
 		Pictogram:          challenge.Pictogram,
 		PictogramSpeakable: challenge.PictogramSpeakable,
 		ExpiresAt:          challenge.ExpiresAt.Format(time.RFC3339),

@@ -64,6 +64,8 @@ func getBaseURL() string {
 // TestChallenge represents a created challenge for testing
 type TestChallenge struct {
 	ChallengeID        string   `json:"challenge_id"`
+	ChallengeBytes     string   `json:"challenge_bytes"`
+	ServerSignature    string   `json:"server_signature"`
 	Fingerprint        string   `json:"fingerprint"`
 	DevicePublicKey    string   `json:"device_public_key"`
 	Pictogram          []string `json:"pictogram"`
@@ -175,13 +177,16 @@ func generateTestDevice(t *testing.T) *TestDevice {
 	}
 }
 
-// SignChallenge signs a challenge ID with the device's private key
-func (d *TestDevice) SignChallenge(t *testing.T, challengeID string) string {
+// SignChallenge signs challenge bytes with the device's private key
+func (d *TestDevice) SignChallenge(t *testing.T, challengeBytesB64 string) string {
 	t.Helper()
 
-	// Sign the challenge ID (simplified - real implementation would sign challenge_bytes)
-	message := []byte(challengeID)
-	hash := sha256.Sum256(message)
+	// Decode challenge bytes from base64
+	challengeBytes, err := base64.StdEncoding.DecodeString(challengeBytesB64)
+	require.NoError(t, err, "Failed to decode challenge bytes")
+
+	// Sign the challenge bytes (SHA256 hash)
+	hash := sha256.Sum256(challengeBytes)
 
 	r, s, err := ecdsa.Sign(rand.Reader, d.PrivateKey, hash[:])
 	require.NoError(t, err, "Failed to sign challenge")

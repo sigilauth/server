@@ -31,8 +31,8 @@ func TestRegisterAndAuth(t *testing.T) {
 	status := getChallengeStatus(t, client, baseURL, challenge.ChallengeID)
 	require.Equal(t, "pending", status.Status, "Challenge should be pending")
 
-	// 4. Device signs the challenge
-	signature := device.SignChallenge(t, challenge.ChallengeID)
+	// 4. Device signs the challenge bytes
+	signature := device.SignChallenge(t, challenge.ChallengeBytes)
 
 	// 5. Device responds with signature
 	err := respondToChallengeWithSignature(t, client, baseURL, challenge.ChallengeID, device.Fingerprint, signature)
@@ -86,8 +86,8 @@ func TestReplayRejection(t *testing.T) {
 	// 2. Create challenge
 	challenge := createTestChallengeForDevice(t, client, baseURL, device)
 
-	// 3. Device signs the challenge
-	signature := device.SignChallenge(t, challenge.ChallengeID)
+	// 3. Device signs the challenge bytes
+	signature := device.SignChallenge(t, challenge.ChallengeBytes)
 
 	// 4. First response - should succeed
 	err := respondToChallengeWithSignature(t, client, baseURL, challenge.ChallengeID, device.Fingerprint, signature)

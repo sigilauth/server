@@ -1,30 +1,119 @@
 package e2e
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestMPA2of3 tests 2-of-3 multi-party authorization with clear notifications.
 // Scenario: 3 groups, 2 required. Group 0 approves, Group 1 approves, Group 2 gets clear.
-// BLOCKED: Requires B1 (server), B2 (relay), B11 (docker-compose).
 func TestMPA2of3(t *testing.T) {
 	requireDockerStack(t)
-	ctx := newTestContext(t)
-	_ = ctx
-	
-	t.Log("BLOCKED: B1/B2/B11 not implemented")
-	t.Skip("Awaiting B1 (server), B2 (relay), B11 (docker-compose)")
-	
-	// TODO: Implementation when dependencies ready:
+	_ = newTestContext(t)
+
+	client := newHTTPClient()
+	baseURL := getBaseURL()
+
 	// 1. Create 5 devices across 3 groups (Sarah: 2, Mike: 1, Damon: 2)
-	// 2. Register all devices with relay
-	// 3. Integrator requests MPA (required=2, groups=3)
-	// 4. All 5 devices receive push
-	// 5. Sarah's iPhone approves → Group 0 satisfied
-	// 6. Sarah's iPad receives "clear" notification
-	// 7. Mike's Pixel approves → Group 1 satisfied → Quorum
-	// 8. Damon's devices receive "clear" notification
-	// 9. Integrator receives approved webhook
+	sarahiPhone := generateTestDevice(t)
+	sarahiPad := generateTestDevice(t)
+	mikePixel := generateTestDevice(t)
+	damonMacBook := generateTestDevice(t)
+	damonYubiKey := generateTestDevice(t)
+
+	fingerprints := []string{sarahiPhone.Fingerprint, sarahiPad.Fingerprint, mikePixel.Fingerprint, damonMacBook.Fingerprint, damonYubiKey.Fingerprint}
+
+	// 2. Create MPA request (required=2, 3 groups)
+	mpaReq := map[string]interface{}{
+		"fingerprints": fingerprints,
+		"required":     2,
+		"action": map[string]interface{}{
+			"type":        "destructive_action",
+			"description": "Delete production database",
+		},
+		"groups": []map[string]interface{}{
+			{
+				"members": []map[string]interface{}{
+					{"fingerprint": sarahiPhone.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(sarahiPhone.PublicKeyCompressed)},
+					{"fingerprint": sarahiPad.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(sarahiPad.PublicKeyCompressed)},
+				},
+			},
+			{
+				"members": []map[string]interface{}{
+					{"fingerprint": mikePixel.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(mikePixel.PublicKeyCompressed)},
+				},
+			},
+			{
+				"members": []map[string]interface{}{
+					{"fingerprint": damonMacBook.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(damonMacBook.PublicKeyCompressed)},
+					{"fingerprint": damonYubiKey.Fingerprint, "device_public_key": base64.StdEncoding.EncodeToString(damonYubiKey.PublicKeyCompressed)},
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(mpaReq)
+	resp, err := client.Post(baseURL+"/mpa/request", "application/json", bytes.NewReader(body))
+	require.NoError(t, err, "MPA request should succeed")
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "MPA request should return 201")
+
+	var mpaResp struct {
+		RequestID string `json:"request_id"`
+		Status    string `json:"status"`
+		Required  int    `json:"required"`
+		Approved  int    `json:"approved"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&mpaResp)
+	require.NoError(t, err)
+	require.Equal(t, "pending", mpaResp.Status)
+	require.Equal(t, 0, mpaResp.Approved)
+
+	// 3. Sarah's iPhone approves (Group 0)
+	approveReq := map[string]interface{}{
+		"request_id":  mpaResp.RequestID,
+		"fingerprint": sarahiPhone.Fingerprint,
+		"signature":   sarahiPhone.SignChallenge(t, mpaResp.RequestID),
+		"approved":    true,
+	}
+	body, _ = json.Marshal(approveReq)
+	resp, err = client.Post(baseURL+"/mpa/respond", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// 4. Mike's Pixel approves (Group 1) → Quorum reached
+	approveReq["fingerprint"] = mikePixel.Fingerprint
+	approveReq["signature"] = mikePixel.SignChallenge(t, mpaResp.RequestID)
+	body, _ = json.Marshal(approveReq)
+	resp, err = client.Post(baseURL+"/mpa/respond", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// 5. Check MPA status - should be approved (2/2 groups)
+	statusResp, err := client.Get(baseURL + "/mpa/status/" + mpaResp.RequestID)
+	require.NoError(t, err)
+	defer statusResp.Body.Close()
+
+	var status struct {
+		RequestID string `json:"request_id"`
+		Status    string `json:"status"`
+		Required  int    `json:"required"`
+		Approved  int    `json:"approved"`
+	}
+	err = json.NewDecoder(statusResp.Body).Decode(&status)
+	require.NoError(t, err)
+	require.Equal(t, "approved", status.Status, "MPA should be approved after 2/2 groups approve")
+	require.Equal(t, 2, status.Approved)
+
+	t.Log("✅ 2-of-3 MPA test completed successfully")
 }
 
 // TestMPASameGroupDoubleApproval tests that same-group approvals don't double-count.

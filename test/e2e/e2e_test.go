@@ -149,9 +149,13 @@ func generateTestDevice(t *testing.T) *TestDevice {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err, "Failed to generate device keypair")
 
-	// Compress public key (33 bytes: 0x02/0x03 + X coordinate)
+	// Compress public key (33 bytes: 0x02/0x03 prefix + X coordinate)
 	pubKeyCompressed := make([]byte, 33)
-	privateKey.PublicKey.X.FillBytes(pubKeyCompressed[1:33])
+	// X coordinate is 32 bytes for P-256
+	xBytes := privateKey.PublicKey.X.Bytes()
+	copy(pubKeyCompressed[33-len(xBytes):], xBytes) // Right-align X coordinate
+
+	// Parity byte: 0x02 if Y is even, 0x03 if Y is odd
 	if privateKey.PublicKey.Y.Bit(0) == 0 {
 		pubKeyCompressed[0] = 0x02
 	} else {

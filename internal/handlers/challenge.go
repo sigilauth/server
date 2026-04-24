@@ -118,7 +118,21 @@ func (h *Handler) Respond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode signature (base64)
+	// Check if challenge exists and is not expired BEFORE validating signature format
+	// This ensures expired challenges return CHALLENGE_EXPIRED, not INVALID_SIGNATURE
+	_, err := h.sessionStore.GetChallenge(r.Context(), req.ChallengeID)
+	if err != nil {
+		// GetChallenge returns "challenge not found" or "challenge expired"
+		errMsg := err.Error()
+		if errMsg == "challenge not found" || errMsg == "challenge expired" {
+			writeError(w, http.StatusGone, "CHALLENGE_EXPIRED", errMsg)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", errMsg)
+		return
+	}
+
+	// Now validate signature format
 	signatureBytes, err := base64.StdEncoding.DecodeString(req.Signature)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_SIGNATURE", "Signature must be base64")
@@ -131,7 +145,7 @@ func (h *Handler) Respond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify challenge
+	// Verify challenge (expiry already checked, now verify signature)
 	err = h.sessionStore.VerifyChallenge(r.Context(), session.VerifyRequest{
 		ChallengeID: req.ChallengeID,
 		Fingerprint: req.Fingerprint,

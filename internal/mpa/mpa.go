@@ -45,10 +45,10 @@ type CreateRequest struct {
 
 // Response is a device's response to an MPA request.
 type Response struct {
-	RequestID       string
-	DevicePublicKey []byte
-	Signature       []byte
-	Decision        string
+	RequestID   string
+	Fingerprint string
+	Signature   []byte
+	Decision    string
 }
 
 // Approval records a single approval.
@@ -165,20 +165,20 @@ func (s *Store) Respond(ctx context.Context, resp Response) (*Request, error) {
 		return nil, fmt.Errorf("request already completed with status: %s", request.Status)
 	}
 
-	devicePubKey, err := crypto.DecompressPublicKey(resp.DevicePublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("invalid device public key: %w", err)
+	// Find group and member by fingerprint
+	groupIdx, member := s.findMember(request, resp.Fingerprint)
+	if groupIdx == -1 {
+		return nil, fmt.Errorf("device not in any group")
 	}
 
-	fingerprint := crypto.FingerprintHex(crypto.FingerprintFromPublicKey(devicePubKey))
+	// Use stored device public key for verification
+	devicePubKey, err := crypto.DecompressPublicKey(member.DevicePublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid stored device public key: %w", err)
+	}
 
 	if err := crypto.Verify(devicePubKey, []byte(resp.RequestID), resp.Signature); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
-	}
-
-	groupIdx := s.findGroupIndex(request, fingerprint)
-	if groupIdx == -1 {
-		return nil, fmt.Errorf("device not in any group")
 	}
 
 	if s.isGroupSatisfied(request, groupIdx) {
@@ -187,7 +187,7 @@ func (s *Store) Respond(ctx context.Context, resp Response) (*Request, error) {
 
 	now := time.Now()
 	request.Approvals = append(request.Approvals, Approval{
-		Fingerprint: fingerprint,
+		Fingerprint: resp.Fingerprint,
 		Decision:    resp.Decision,
 		Timestamp:   now,
 	})
@@ -215,17 +215,24 @@ func (s *Store) Respond(ctx context.Context, resp Response) (*Request, error) {
 	return request, nil
 }
 
-// findGroupIndex returns the index of the group containing the fingerprint.
-// Returns -1 if not found.
-func (s *Store) findGroupIndex(request *Request, fingerprint string) int {
+// findMember returns the group index and member matching the fingerprint.
+// Returns -1 and nil if not found.
+func (s *Store) findMember(request *Request, fingerprint string) (int, *Member) {
 	for groupIdx, group := range request.Groups {
-		for _, member := range group.Members {
+		for i, member := range group.Members {
 			if member.Fingerprint == fingerprint {
-				return groupIdx
+				return groupIdx, &group.Members[i]
 			}
 		}
 	}
-	return -1
+	return -1, nil
+}
+
+// findGroupIndex returns the index of the group containing the fingerprint.
+// Returns -1 if not found.
+func (s *Store) findGroupIndex(request *Request, fingerprint string) int {
+	idx, _ := s.findMember(request, fingerprint)
+	return idx
 }
 
 // isGroupSatisfied checks if a group has already been satisfied.

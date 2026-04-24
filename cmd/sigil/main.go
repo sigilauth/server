@@ -1,55 +1,87 @@
 package main
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"log"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
+	"github.com/sigilauth/server/internal/handlers"
+	"github.com/sigilauth/server/internal/initwizard"
+	"github.com/sigilauth/server/internal/session"
+	"github.com/sigilauth/server/internal/telemetry"
 )
 
-// Stub binary for B1 - Sigil Auth Server
-// This is a minimal implementation to unblock Forge (B11/B14) while full implementation is in progress.
-//
-// Full implementation will be added as internal packages are completed.
-
-const version = "0.1.0-stub"
-
-type InfoResponse struct {
-	ServerID        string            `json:"server_id"`
-	ServerName      string            `json:"server_name"`
-	Version         string            `json:"version"`
-	Mode            string            `json:"mode"`
-	Features        map[string]bool   `json:"features"`
-}
-
-type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
-	Mode    string `json:"mode"`
-	Uptime  string `json:"uptime"`
-}
-
-var startTime = time.Now()
+const version = "0.1.0"
 
 func main() {
-	port := getEnv("SIGIL_PORT", "8443")
-	mode := getEnv("SIGIL_MODE", "stub")
+	// Force output immediately
+	fmt.Fprintln(os.Stderr, "=== MAIN() CALLED ===")
+	fmt.Fprintln(os.Stdout, "=== STDOUT TEST ===")
+	os.Stderr.Sync()
+	os.Stdout.Sync()
 
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("=== SIGIL SERVER STARTING ===")
+
+	ctx := context.Background()
+
+	// Initialize telemetry
+	log.Println("Initializing telemetry...")
+	tel := telemetry.New(telemetry.Config{
+		ServiceName: "sigil-auth-server",
+		Enabled:     true,
+	})
+	log.Println("Telemetry initialized")
+
+	log.Printf("Sigil Auth Server v%s starting...", version)
+
+	// Check if server is initialized
+	identityPath := getEnv("SIGIL_IDENTITY_FILE", "/data/server-identity.json")
+	log.Printf("Identity path: %s", identityPath)
+
+	log.Println("Loading or initializing server identity...")
+	identity, err := loadOrInitialize(identityPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize server: %v", err)
+	}
+	log.Println("Identity loaded successfully")
+
+	log.Printf("Server ID: %s", identity.ServerID)
+	log.Printf("Pictogram: %s", identity.PictogramSpeakable)
+
+	// Create session store
+	sessionStore := session.NewStore()
+
+	// Create handlers
+	h := handlers.New(sessionStore, tel, identity.PrivateKey)
+
+	// Setup HTTP routes
 	mux := http.NewServeMux()
 
-	// Health endpoint (for docker-compose healthchecks)
+	// Health endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(HealthResponse{
-			Status:  "ok",
-			Version: version,
-			Mode:    mode,
-			Uptime:  time.Since(startTime).String(),
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"version": version,
 		})
 	})
 
-	// Info endpoint (no auth required)
+	// Info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -57,51 +89,122 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(InfoResponse{
-			ServerID:   "sigil-stub-001",
-			ServerName: "Sigil Auth Stub",
-			Version:    version,
-			Mode:       mode,
-			Features: map[string]bool{
-				"mpa":                 false,
-				"secure_decrypt":      false,
-				"mnemonic_generation": false,
-				"webhooks":            false,
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"server_id":                  identity.ServerID,
+			"server_public_key":          identity.PublicKey,
+			"server_pictogram":           identity.Pictogram,
+			"server_pictogram_speakable": identity.PictogramSpeakable,
+			"version":                    version,
+			"mode":                       "operational",
+			"features": map[string]bool{
+				"mpa":                 true,
+				"secure_decrypt":      true,
+				"mnemonic_generation": true,
+				"webhooks":            true,
 			},
 		})
 	})
 
-	// Stub endpoints (return 501 Not Implemented)
-	stubEndpoints := []string{
-		"/challenge",
-		"/challenge/",
-		"/respond",
-		"/mpa/request",
-		"/mpa/",
-		"/v1/secure/decrypt",
-		"/webhooks",
+	// Challenge endpoints
+	mux.HandleFunc("/challenge", h.CreateChallenge)
+	mux.HandleFunc("/respond", h.Respond)
+	mux.HandleFunc("/v1/auth/challenge/", h.GetChallengeStatus)
+
+	// MPA endpoints
+	mux.HandleFunc("/mpa/request", h.CreateMPARequest)
+	mux.HandleFunc("/mpa/respond", h.RespondMPA)
+	mux.HandleFunc("/mpa/status/", h.GetMPAStatus)
+
+	// Secure decrypt endpoints
+	mux.HandleFunc("/v1/secure/decrypt", h.SecureDecrypt)
+	mux.HandleFunc("/v1/secure/decrypt/", h.GetDecryptStatus)
+
+	// Webhook configuration
+	mux.HandleFunc("/v1/config/webhooks", h.ConfigureWebhook)
+
+	// Metrics endpoint
+	mux.Handle("/metrics", tel.MetricsHandler())
+
+	// Start periodic cleanup
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			removed := sessionStore.CleanExpired(ctx)
+			if removed > 0 {
+				log.Printf("Cleaned %d expired challenges", removed)
+			}
+		}
+	}()
+
+	// TLS certificate setup
+	certFile := getEnv("SIGIL_TLS_CERT", "/data/server.crt")
+	keyFile := getEnv("SIGIL_TLS_KEY", "/data/server.key")
+
+	// Generate self-signed cert if not exists
+	if err := ensureTLSCertificate(certFile, keyFile); err != nil {
+		log.Fatalf("Failed to setup TLS certificate: %v", err)
 	}
 
-	for _, path := range stubEndpoints {
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error":   "NOT_IMPLEMENTED",
-				"message": "This endpoint is not yet implemented. Stub binary for B11/B14 integration testing.",
-			})
-		})
+	// HTTPS server
+	port := getEnv("SIGIL_PORT", "8443")
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
-	addr := ":" + port
-	log.Printf("Sigil Auth Server (STUB) starting on %s", addr)
-	log.Printf("Version: %s", version)
-	log.Printf("Mode: %s", mode)
-	log.Printf("Endpoints: /health, /info (others return 501)")
+	// Graceful shutdown
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+		log.Println("Shutting down gracefully...")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Shutdown error: %v", err)
+		}
+	}()
+
+	log.Printf("Server listening on https://localhost%s", srv.Addr)
+	if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Server failed: %v", err)
 	}
+
+	log.Println("Server stopped")
+}
+
+func loadOrInitialize(identityPath string) (*initwizard.ServerIdentity, error) {
+	// Try to load existing identity
+	identity, err := initwizard.LoadFromFile(identityPath)
+	if err == nil {
+		return identity, nil
+	}
+
+	// Check for mnemonic in environment (for non-interactive initialization)
+	mnemonic := os.Getenv("SIGIL_MNEMONIC")
+	if mnemonic == "" {
+		return nil, fmt.Errorf("server not initialized: set SIGIL_MNEMONIC or run init wizard")
+	}
+
+	// Derive identity from mnemonic
+	identity, err = initwizard.DeriveServerIdentity(mnemonic)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive identity: %w", err)
+	}
+
+	// Save identity
+	if err := identity.SaveToFile(identityPath); err != nil {
+		log.Printf("Warning: failed to save identity: %v", err)
+	}
+
+	return identity, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -109,4 +212,88 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func ensureTLSCertificate(certFile, keyFile string) error {
+	// Check if cert and key already exist
+	if _, err := os.Stat(certFile); err == nil {
+		if _, err := os.Stat(keyFile); err == nil {
+			log.Printf("Using existing TLS certificate: %s", certFile)
+			return nil
+		}
+	}
+
+	log.Printf("Generating self-signed TLS certificate...")
+
+	// Generate self-signed certificate
+	if err := generateSelfSignedCert(certFile, keyFile); err != nil {
+		return fmt.Errorf("failed to generate certificate: %w", err)
+	}
+
+	log.Printf("Self-signed TLS certificate generated: %s", certFile)
+	return nil
+}
+
+func generateSelfSignedCert(certFile, keyFile string) error {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	notBefore := time.Now()
+	notAfter := notBefore.Add(365 * 24 * time.Hour) // 1 year
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Sigil Auth"},
+			CommonName:   "localhost",
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	// Write cert
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return fmt.Errorf("failed to create cert file: %w", err)
+	}
+	defer certOut.Close()
+
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return fmt.Errorf("failed to write cert: %w", err)
+	}
+
+	// Write key
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create key file: %w", err)
+	}
+	defer keyOut.Close()
+
+	privBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes}); err != nil {
+		return fmt.Errorf("failed to write key: %w", err)
+	}
+
+	return nil
 }

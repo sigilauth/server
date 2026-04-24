@@ -53,9 +53,9 @@ type Challenge struct {
 
 // VerifyRequest is the input for verifying a challenge response.
 type VerifyRequest struct {
-	ChallengeID     string
-	DevicePublicKey []byte
-	Signature       []byte
+	ChallengeID string
+	Fingerprint string
+	Signature   []byte
 }
 
 // Store manages in-memory challenge sessions.
@@ -175,20 +175,18 @@ func (s *Store) VerifyChallenge(ctx context.Context, req VerifyRequest) error {
 		return fmt.Errorf("challenge already used")
 	}
 
-	providedPubKey, err := crypto.DecompressPublicKey(req.DevicePublicKey)
+	// Verify fingerprint matches the challenge
+	if req.Fingerprint != challenge.Fingerprint {
+		return fmt.Errorf("fingerprint mismatch")
+	}
+
+	// Use stored device public key for signature verification
+	devicePubKey, err := crypto.DecompressPublicKey(challenge.DevicePublicKey)
 	if err != nil {
-		return fmt.Errorf("invalid device public key: %w", err)
+		return fmt.Errorf("invalid stored device public key: %w", err)
 	}
 
-	providedFingerprint := crypto.FingerprintFromPublicKey(providedPubKey)
-	providedFingerprintHex := crypto.FingerprintHex(providedFingerprint)
-
-	if providedFingerprintHex != challenge.Fingerprint {
-		return fmt.Errorf("fingerprint mismatch: expected %s, got %s",
-			challenge.Fingerprint, providedFingerprintHex)
-	}
-
-	if err := crypto.Verify(providedPubKey, challenge.ChallengeBytes, req.Signature); err != nil {
+	if err := crypto.Verify(devicePubKey, challenge.ChallengeBytes, req.Signature); err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
 

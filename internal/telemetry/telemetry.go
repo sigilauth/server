@@ -13,11 +13,18 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,6 +41,7 @@ type Telemetry struct {
 	logger     *slog.Logger
 	tracer     trace.Tracer
 	registry   *prometheus.Registry
+	tracerShutdown func(context.Context) error
 
 	// Prometheus metrics
 	challengesCreated  *prometheus.CounterVec
@@ -122,7 +130,13 @@ func New(config Config) *Telemetry {
 	registry.MustRegister(challengeVerifyDuration)
 	registry.MustRegister(mpaRequestDuration)
 
-	// Setup OpenTelemetry tracer
+	// Setup OpenTelemetry tracer with configurable OTLP exporter
+	shutdown, err := initTracer(config.ServiceName)
+	if err != nil {
+		logger.Warn("Failed to initialize tracer, continuing without tracing", "error", err)
+		shutdown = func(context.Context) error { return nil }
+	}
+
 	tracer := otel.Tracer(config.ServiceName)
 
 	return &Telemetry{
@@ -130,12 +144,93 @@ func New(config Config) *Telemetry {
 		logger:                 logger,
 		tracer:                 tracer,
 		registry:               registry,
+		tracerShutdown:         shutdown,
 		challengesCreated:      challengesCreated,
 		challengesVerified:     challengesVerified,
 		mpaRequests:            mpaRequests,
 		challengeVerifyDuration: challengeVerifyDuration,
 		mpaRequestDuration:     mpaRequestDuration,
 	}
+}
+
+// Shutdown gracefully shuts down the telemetry, flushing any pending traces.
+func (t *Telemetry) Shutdown(ctx context.Context) error {
+	if t.tracerShutdown != nil {
+		return t.tracerShutdown(ctx)
+	}
+	return nil
+}
+
+// initTracer initializes the OpenTelemetry trace provider with configurable OTLP exporter.
+//
+// Reads standard OTel environment variables:
+// - OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (e.g., "localhost:4317" for gRPC, "http://localhost:4318" for HTTP)
+// - OTEL_EXPORTER_OTLP_PROTOCOL: grpc or http/protobuf (default: grpc)
+// - OTEL_SERVICE_NAME: service name (default: serviceName parameter)
+// - OTEL_RESOURCE_ATTRIBUTES: comma-separated key=value pairs
+//
+// If OTEL_EXPORTER_OTLP_ENDPOINT is unset, returns a no-op shutdown function.
+// If endpoint is unreachable, logs a warning and returns a no-op shutdown function.
+func initTracer(serviceName string) (func(context.Context) error, error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		slog.Info("OTEL_EXPORTER_OTLP_ENDPOINT not set, tracing disabled")
+		return func(context.Context) error { return nil }, nil
+	}
+
+	protocol := os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+	if protocol == "" {
+		protocol = "grpc"
+	}
+
+	otelServiceName := os.Getenv("OTEL_SERVICE_NAME")
+	if otelServiceName == "" {
+		otelServiceName = serviceName
+	}
+
+	ctx := context.Background()
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName(otelServiceName),
+		),
+	)
+	if err != nil {
+		return func(context.Context) error { return nil }, err
+	}
+
+	var exporter sdktrace.SpanExporter
+	if protocol == "http/protobuf" || strings.Contains(endpoint, "http://") || strings.Contains(endpoint, "https://") {
+		exporter, err = otlptracehttp.New(ctx,
+			otlptracehttp.WithEndpoint(strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")),
+			otlptracehttp.WithInsecure(),
+		)
+	} else {
+		exporter, err = otlptracegrpc.New(ctx,
+			otlptracegrpc.WithEndpoint(endpoint),
+			otlptracegrpc.WithInsecure(),
+		)
+	}
+
+	if err != nil {
+		slog.Warn("Failed to create OTLP exporter, continuing without tracing", "error", err, "endpoint", endpoint)
+		return func(context.Context) error { return nil }, nil
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	slog.Info("OTel tracer initialized", "endpoint", endpoint, "protocol", protocol, "service", otelServiceName)
+
+	return tp.Shutdown, nil
 }
 
 // IsEnabled returns true if telemetry is enabled.

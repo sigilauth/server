@@ -151,6 +151,7 @@ Environment variables:
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `SIGIL_PORT` | No | 8443 | HTTPS port |
+| `SIGIL_HTTP_PORT` | No | - | HTTP port (edge proxy mode, disables HTTPS) |
 | `SIGIL_MNEMONIC_PATH` | Yes (operational) | - | Path to BIP39 mnemonic file |
 | `RELAY_URL` | Yes | - | Push relay service URL |
 | `WEBHOOK_URL` | No | - | Default integrator webhook URL |
@@ -158,6 +159,41 @@ Environment variables:
 | `SIGIL_TLS_CERT` | No | - | TLS certificate path (or self-signed) |
 | `SIGIL_TLS_KEY` | No | - | TLS private key path |
 | `SIGIL_MODE` | No | `operational` | Mode: `init` or `operational` |
+| **OpenTelemetry (optional)** ||||
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | - | OTLP endpoint (e.g., `localhost:4317` for gRPC, `http://localhost:4318` for HTTP) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | No | `grpc` | OTLP protocol: `grpc` or `http/protobuf` |
+| `OTEL_SERVICE_NAME` | No | `sigil-auth-server` | Service name in traces |
+| `OTEL_RESOURCE_ATTRIBUTES` | No | - | Comma-separated key=value resource attributes |
+
+### OpenTelemetry Examples
+
+**Send traces to local OTel collector (gRPC):**
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+export OTEL_SERVICE_NAME=sigil-auth-primary
+./sigil
+```
+
+**Send traces to Jaeger (HTTP):**
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_SERVICE_NAME=sigil-auth
+./sigil
+```
+
+**Send traces to Tempo via OTLP gRPC:**
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
+export OTEL_SERVICE_NAME=sigil-server
+./sigil
+```
+
+**Disable tracing (no endpoint set):**
+```bash
+unset OTEL_EXPORTER_OTLP_ENDPOINT
+./sigil  # Logs "OTEL_EXPORTER_OTLP_ENDPOINT not set, tracing disabled"
+```
 
 ---
 

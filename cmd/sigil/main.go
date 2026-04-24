@@ -157,6 +157,10 @@ func main() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
+			if err := tel.Shutdown(shutdownCtx); err != nil {
+				log.Printf("Telemetry shutdown error: %v", err)
+			}
+
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				log.Printf("Shutdown error: %v", err)
 			}
@@ -196,6 +200,10 @@ func main() {
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+
+		if err := tel.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Telemetry shutdown error: %v", err)
+		}
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Shutdown error: %v", err)

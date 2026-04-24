@@ -137,16 +137,47 @@ func main() {
 		}
 	}()
 
-	// TLS certificate setup
+	httpPort := os.Getenv("SIGIL_HTTP_PORT")
+	if httpPort != "" {
+		srv := &http.Server{
+			Addr:         ":" + httpPort,
+			Handler:      mux,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  120 * time.Second,
+		}
+
+		go func() {
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			<-sigChan
+
+			log.Println("Shutting down gracefully...")
+
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				log.Printf("Shutdown error: %v", err)
+			}
+		}()
+
+		log.Printf("Server listening on http://localhost%s (plain HTTP mode for edge proxy deployment)", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+
+		log.Println("Server stopped")
+		return
+	}
+
 	certFile := getEnv("SIGIL_TLS_CERT", "/data/server.crt")
 	keyFile := getEnv("SIGIL_TLS_KEY", "/data/server.key")
 
-	// Generate self-signed cert if not exists
 	if err := ensureTLSCertificate(certFile, keyFile); err != nil {
 		log.Fatalf("Failed to setup TLS certificate: %v", err)
 	}
 
-	// HTTPS server
 	port := getEnv("SIGIL_PORT", "8443")
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -156,7 +187,6 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

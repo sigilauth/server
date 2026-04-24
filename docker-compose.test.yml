@@ -14,6 +14,9 @@ version: '3.8'
 services:
   relay:
     environment:
+      # Test server public key (P-256) - DO NOT USE IN PRODUCTION
+      SERVER_PUBLIC_KEY: "A76yj+ZMatXkyyUv3PGYYFUjcSNMoZ8Hgqz+vOISrkN5"
+
       # Mock push providers (no real credentials)
       APNS_MOCK: "true"
       FCM_MOCK: "true"

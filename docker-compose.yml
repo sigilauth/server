@@ -51,6 +51,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Security (required for signature verification)
+      SERVER_PUBLIC_KEY: ${SERVER_PUBLIC_KEY:-}
+
       # Database
       DATABASE_URL: postgresql://relay:${POSTGRES_PASSWORD:-relay_dev_password}@postgres:5432/relay
 

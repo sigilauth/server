@@ -159,10 +159,9 @@ func generateTestDevice(t *testing.T) *TestDevice {
 		pubKeyCompressed[0] = 0x03
 	}
 
-	// X coordinate (32 bytes for P-256) goes in bytes 1-32
-	xBytes := privateKey.PublicKey.X.Bytes()
-	// Right-align X in the 32-byte space (in case it's shorter)
-	copy(pubKeyCompressed[1+32-len(xBytes):], xBytes)
+	// X coordinate (32 bytes for P-256) fills bytes 1-33
+	// Use FillBytes to ensure exactly 32 bytes with leading zeros if needed
+	privateKey.PublicKey.X.FillBytes(pubKeyCompressed[1:])
 
 	// Compute fingerprint = SHA256(compressed public key)
 	hash := sha256.Sum256(pubKeyCompressed)

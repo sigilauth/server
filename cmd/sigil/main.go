@@ -181,27 +181,34 @@ func main() {
 }
 
 func loadOrInitialize(identityPath string) (*initwizard.ServerIdentity, error) {
-	// Try to load existing identity
-	identity, err := initwizard.LoadFromFile(identityPath)
-	if err == nil {
-		return identity, nil
-	}
-
-	// Check for mnemonic in environment (for non-interactive initialization)
+	// Mnemonic is always required (for deriving private key)
 	mnemonic := os.Getenv("SIGIL_MNEMONIC")
 	if mnemonic == "" {
-		return nil, fmt.Errorf("server not initialized: set SIGIL_MNEMONIC or run init wizard")
+		return nil, fmt.Errorf("server not initialized: set SIGIL_MNEMONIC environment variable")
 	}
 
-	// Derive identity from mnemonic
-	identity, err = initwizard.DeriveServerIdentity(mnemonic)
+	// Derive identity from mnemonic (gets PrivateKey)
+	identity, err := initwizard.DeriveServerIdentity(mnemonic)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive identity: %w", err)
 	}
 
-	// Save identity
-	if err := identity.SaveToFile(identityPath); err != nil {
-		log.Printf("Warning: failed to save identity: %v", err)
+	// Try to load existing identity file for verification
+	existingIdentity, err := initwizard.LoadFromFile(identityPath)
+	if err == nil {
+		// File exists - verify it matches the mnemonic-derived identity
+		if existingIdentity.ServerID != identity.ServerID {
+			return nil, fmt.Errorf("mismatch: mnemonic derives server ID %s, but file has %s",
+				identity.ServerID, existingIdentity.ServerID)
+		}
+		log.Println("Identity file verified against mnemonic")
+	} else {
+		// File doesn't exist - save the derived identity
+		if err := identity.SaveToFile(identityPath); err != nil {
+			log.Printf("Warning: failed to save identity: %v", err)
+		} else {
+			log.Printf("Identity saved to %s", identityPath)
+		}
 	}
 
 	return identity, nil

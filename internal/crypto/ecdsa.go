@@ -38,6 +38,20 @@ func Sign(privateKey *ecdsa.PrivateKey, message []byte) ([]byte, error) {
 	return signature, nil
 }
 
+// SignWithDomain creates an ECDSA signature with domain separation.
+//
+// Prepends the domain tag to the message before hashing and signing.
+// Per api/domain-separation.md, prevents cross-protocol signature replay.
+//
+// Algorithm: signature = ECDSA-Sign(SHA256(domain_tag || message))
+func SignWithDomain(privateKey *ecdsa.PrivateKey, domainTag string, message []byte) ([]byte, error) {
+	tagged := make([]byte, 0, len(domainTag)+len(message))
+	tagged = append(tagged, []byte(domainTag)...)
+	tagged = append(tagged, message...)
+
+	return Sign(privateKey, tagged)
+}
+
 // Verify checks an ECDSA signature against a message and public key.
 //
 // Signature must be exactly 64 bytes (r || s). Message is hashed with SHA-256.
@@ -65,6 +79,20 @@ func Verify(publicKey *ecdsa.PublicKey, message, signature []byte) error {
 	}
 
 	return nil
+}
+
+// VerifyWithDomain checks an ECDSA signature with domain separation.
+//
+// Prepends the domain tag to the message before hashing and verifying.
+// Per api/domain-separation.md, prevents cross-protocol signature replay.
+//
+// Algorithm: verify ECDSA-Verify(SHA256(domain_tag || message), signature)
+func VerifyWithDomain(publicKey *ecdsa.PublicKey, domainTag string, message, signature []byte) error {
+	tagged := make([]byte, 0, len(domainTag)+len(message))
+	tagged = append(tagged, []byte(domainTag)...)
+	tagged = append(tagged, message...)
+
+	return Verify(publicKey, tagged, signature)
 }
 
 // HalfOrder returns N/2 where N is the curve order.

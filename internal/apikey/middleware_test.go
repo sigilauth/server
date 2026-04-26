@@ -9,7 +9,7 @@ import (
 
 func TestRequireAPIKey(t *testing.T) {
 	ctx := context.Background()
-	store := NewStore()
+	store := NewTestStore()
 
 	// Add a valid test key
 	validKey := Generate()
@@ -141,7 +141,7 @@ func TestGetKeyIDFromContext(t *testing.T) {
 
 func TestRequireAPIKey_ConcurrentRequests(t *testing.T) {
 	ctx := context.Background()
-	store := NewStore()
+	store := NewTestStore()
 
 	// Add multiple keys
 	keys := make(map[string]string)

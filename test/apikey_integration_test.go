@@ -20,7 +20,7 @@ import (
 // require valid API keys and reject requests without them.
 func TestAPIKeyProtectedEndpoints(t *testing.T) {
 	// Setup: create API key store with test key
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 	testKey := apikey.Generate()
 	testKeyID := "test-integration"

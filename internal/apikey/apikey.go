@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	keyPrefix   = "sgk_live_"
-	keyLength   = 32 // 32 bytes = 64 hex chars
-	bcryptCost  = 12 // Knox §5.4
+	keyPrefix        = "sgk_live_"
+	keyLength        = 32 // 32 bytes = 64 hex chars
+	DefaultBcryptCost = 12 // Knox §5.4
 )
 
 // Key represents an API key with metadata.
@@ -38,12 +38,14 @@ type Key struct {
 type Store struct {
 	mu   sync.RWMutex
 	keys map[string]*Key // keyID -> Key
+	cost int             // bcrypt cost (12 for production, 4 for tests)
 }
 
-// NewStore creates a new API key store.
+// NewStore creates a new API key store with production bcrypt cost.
 func NewStore() *Store {
 	return &Store{
 		keys: make(map[string]*Key),
+		cost: DefaultBcryptCost,
 	}
 }
 
@@ -79,7 +81,7 @@ func (s *Store) AddKey(ctx context.Context, keyID string, plaintextKey string) e
 	}
 
 	keyHash := hashKey(plaintextKey)
-	hash, err := bcrypt.GenerateFromPassword(keyHash, bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword(keyHash, s.cost)
 	if err != nil {
 		return fmt.Errorf("failed to hash key: %w", err)
 	}
@@ -141,7 +143,7 @@ func (s *Store) RotateKey(ctx context.Context, keyID string, newPlaintextKey str
 	}
 
 	keyHash := hashKey(newPlaintextKey)
-	hash, err := bcrypt.GenerateFromPassword(keyHash, bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword(keyHash, s.cost)
 	if err != nil {
 		return fmt.Errorf("failed to hash new key: %w", err)
 	}

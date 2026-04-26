@@ -41,7 +41,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 			limiter := NewLimiter()
 			// Don't use fast decay for "over limit" test to avoid token refill during loop
 
-			apiKeyStore := apikey.NewStore()
+			apiKeyStore := apikey.NewTestStore()
 			testKey := apikey.Generate()
 			if err := apiKeyStore.AddKey(context.Background(), "test-key", testKey); err != nil {
 				t.Fatalf("failed to add test key: %v", err)
@@ -107,7 +107,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 func TestRateLimitMiddleware_PerKeyIsolation(t *testing.T) {
 	limiter := NewLimiter()
 
-	apiKeyStore := apikey.NewStore()
+	apiKeyStore := apikey.NewTestStore()
 	keyA := apikey.Generate()
 	keyB := apikey.Generate()
 	if err := apiKeyStore.AddKey(context.Background(), "key-a", keyA); err != nil {
@@ -179,7 +179,7 @@ func TestRateLimitMiddleware_WindowReset(t *testing.T) {
 	limiter := NewLimiter()
 	limiter.SetFastDecayForTesting() // Fast refill (100ms window)
 
-	apiKeyStore := apikey.NewStore()
+	apiKeyStore := apikey.NewTestStore()
 	testKey := apikey.Generate()
 	if err := apiKeyStore.AddKey(context.Background(), "test-key", testKey); err != nil {
 		t.Fatalf("failed to add test key: %v", err)

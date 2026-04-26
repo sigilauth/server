@@ -22,12 +22,12 @@ func TestGenerate(t *testing.T) {
 }
 
 func TestNewStore(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	require.NotNil(t, store)
 }
 
 func TestAddKey(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 
 	key := apikey.Generate()
@@ -42,7 +42,7 @@ func TestAddKey(t *testing.T) {
 }
 
 func TestVerifyKey(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 
 	key := apikey.Generate()
@@ -65,7 +65,7 @@ func TestVerifyKey(t *testing.T) {
 }
 
 func TestRevokeKey(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 
 	key := apikey.Generate()
@@ -90,7 +90,7 @@ func TestRevokeKey(t *testing.T) {
 }
 
 func TestListKeys(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 
 	key1 := apikey.Generate()
@@ -116,7 +116,7 @@ func TestListKeys(t *testing.T) {
 }
 
 func TestRotateKey(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 
 	oldKey := apikey.Generate()
@@ -179,7 +179,7 @@ func TestLoadFromEnv(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	store := apikey.NewStore()
+	store := apikey.NewTestStore()
 	ctx := context.Background()
 
 	key := apikey.Generate()

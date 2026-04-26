@@ -70,7 +70,7 @@ func (h *PairHandler) Init(w http.ResponseWriter, r *http.Request) {
 	defer h.pairStore.DecrementIP(r.Context(), sourceIP)
 
 	serverPubCompressed := crypto.CompressPublicKey(&h.serverPrivKey.PublicKey)
-	nonce, sessionPictogram, err := h.deriveSessionPictogram(serverPubCompressed, clientPubBytes)
+	derivedNonce, sessionPictogram, err := h.deriveSessionPictogram(serverPubCompressed, clientPubBytes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to derive session pictogram")
 		return
@@ -89,11 +89,12 @@ func (h *PairHandler) Init(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err = h.pairStore.Create(r.Context(), clientPubBytes, sessionPictogram, handshakeTTL, approvalTTL)
+	nonce, err := h.pairStore.Create(r.Context(), clientPubBytes, sessionPictogram, handshakeTTL, approvalTTL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create pair")
 		return
 	}
+	_ = derivedNonce
 
 	expiresAt := time.Now().Add(handshakeTTL)
 

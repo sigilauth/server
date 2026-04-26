@@ -23,6 +23,8 @@ import (
 	"github.com/sigilauth/server/internal/apikey"
 	"github.com/sigilauth/server/internal/handlers"
 	"github.com/sigilauth/server/internal/initwizard"
+	"github.com/sigilauth/server/internal/pair"
+	"github.com/sigilauth/server/internal/pictogram"
 	"github.com/sigilauth/server/internal/ratelimit"
 	"github.com/sigilauth/server/internal/session"
 	"github.com/sigilauth/server/internal/telemetry"
@@ -66,6 +68,18 @@ func main() {
 	log.Printf("Server ID: %s", identity.ServerID)
 	log.Printf("Pictogram: %s", identity.PictogramSpeakable)
 
+	// Load pictogram pool for session pictogram derivation
+	pictogramPoolPath := getEnv("SIGIL_PICTOGRAM_POOL", "/data/pictogram-pool-v1.json")
+	log.Printf("Loading pictogram pool from: %s", pictogramPoolPath)
+	if err := pictogram.LoadPool(pictogramPoolPath); err != nil {
+		log.Printf("Warning: failed to load pictogram pool: %v", err)
+		log.Println("Attempting fallback to api/pictogram-pool-v1.json...")
+		if err := pictogram.LoadPool("api/pictogram-pool-v1.json"); err != nil {
+			log.Fatalf("Failed to load pictogram pool: %v", err)
+		}
+	}
+	log.Println("Pictogram pool loaded successfully")
+
 	// Load API keys (fail-closed: if no keys loaded, exit)
 	apiKeyStore := loadAPIKeys()
 	log.Printf("Loaded %d API key(s)", len(apiKeyStore.ListKeys(ctx)))
@@ -76,8 +90,12 @@ func main() {
 	// Create session store
 	sessionStore := session.NewStore()
 
+	// Create pair store for handshake state
+	pairStore := pair.NewStore()
+
 	// Create handlers
 	h := handlers.New(sessionStore, tel, identity.PrivateKey)
+	pairHandler := handlers.NewPairHandler(pairStore, identity.PrivateKey, identity.ServerID)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()
@@ -90,6 +108,10 @@ func main() {
 			"version": version,
 		})
 	})
+
+	// Pair endpoints (plaintext JSON, no auth required per spec)
+	mux.HandleFunc("/pair/init", pairHandler.Init)
+	mux.HandleFunc("/pair/complete", pairHandler.Complete)
 
 	// Info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {

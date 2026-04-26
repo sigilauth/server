@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -64,11 +65,17 @@ func (h *EnvelopeHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = serverPubCompressed
 
+	nonce, err := generateNonce()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "NONCE_GENERATION_FAILED", "failed to generate nonce")
+		return
+	}
+
 	respPayload := &envelope.ResponsePayload{
 		Status:    "ok",
 		Body:      map[string]interface{}{"message": "envelope received"},
 		Timestamp: time.Now().Unix(),
-		Nonce:     generateNonce(),
+		Nonce:     nonce,
 	}
 
 	respEnvelope, err := envelope.EncryptResponse(h.serverPrivKey, clientPub, respPayload)
@@ -84,6 +91,10 @@ func (h *EnvelopeHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func generateNonce() string {
-	return hex.EncodeToString([]byte(time.Now().Format("2006-01-02T15:04:05.000000000")))
+func generateNonce() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

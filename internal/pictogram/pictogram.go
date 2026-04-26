@@ -19,7 +19,7 @@ const (
 	argon2KeyLen  = 32
 )
 
-var argon2Salt = []byte("SIGIL-PAIR-V1\x00\x00\x00")
+const argon2Salt = "SIGIL-PAIR-V1\x00\x00\x00"
 
 type Entry struct {
 	Index int    `json:"index"`
@@ -74,7 +74,7 @@ func DeriveSessionPictogram(serverPub, clientPub, serverNonce []byte) ([]string,
 
 	derived := argon2.IDKey(
 		passwordHash,
-		argon2Salt,
+		[]byte(argon2Salt),
 		argon2Time,
 		argon2Memory,
 		argon2Threads,

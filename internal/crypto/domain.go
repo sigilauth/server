@@ -1,17 +1,11 @@
 package crypto
 
 const (
-	DomainAuth    = "SIGIL-AUTH-V1\x00"
-	DomainMPA     = "SIGIL-MPA-V1\x00"
-	DomainDecrypt = "SIGIL-DECRYPT-V1\x00"
-	DomainConv    = "SIGIL-CONV-V1\x00"
-	DomainPair    = "SIGIL-PAIR-V1\x00\x00\x00"
+	DomainConv = "SIGIL-CONV-V1\x00"
+	ArgonSaltPair = "SIGIL-PAIR-V1\x00\x00\x00"
 )
 
 const (
-	DomainAuthLen    = 15
-	DomainMPALen     = 14
-	DomainDecryptLen = 18
-	DomainConvLen    = 15
-	DomainPairLen    = 16
+	DomainConvLen = 16
+	ArgonSaltPairLen = 16
 )

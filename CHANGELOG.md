@@ -29,8 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Per-API-key rate limiting enforced on integrator endpoints (Knox §4).** Token-bucket rate limiting protects auth-critical endpoints: 100 req/15min for `/challenge` and `/respond`, 50 req/15min for `/mpa/*` and `/v1/secure/*`, 1000 req/hour for status endpoints. Rate limits are per-API-key, enforced via middleware chain. Requests exceeding limits receive `429 Too Many Requests` with `Retry-After` header and JSON error body `{"error":"rate_limited","retry_after_seconds":N}`.
 
-- **Webhook delivery now fires on success events (Knox §7.4).** Events `challenge.verified`, `mpa.approved`, `decrypt.completed` now trigger async webhook delivery with HMAC-SHA256 signature (`X-Sigil-Signature: sha256=<hex>`), timestamp header (`X-Sigil-Timestamp: <unix-seconds>`), SSRF protection (RFC-1918 + 127/8 + link-local blocked), and retry with backoff (3 retries: 1s, 5s, 30s). Circuit breaker opens after 5 consecutive failures. Webhook delivery does NOT block response — fires asynchronously in goroutine.
-
 ### Security
 
 - Integrator endpoints are now protected by default. Unauthenticated requests return `401 Unauthorized` with `{"error":"invalid_api_key"}`.

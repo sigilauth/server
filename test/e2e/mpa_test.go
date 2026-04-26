@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -123,10 +122,10 @@ func TestMPASameGroupDoubleApproval(t *testing.T) {
 	requireDockerStack(t)
 	ctx := newTestContext(t)
 	_ = ctx
-	
+
 	t.Log("BLOCKED: B1 not implemented")
 	t.Skip("Awaiting B1 (server)")
-	
+
 	// TODO: Implementation when dependencies ready:
 	// 1. Create MPA with 2 devices in Group 0, 1 device in Group 1, required=2
 	// 2. Device A (Group 0) approves
@@ -142,10 +141,10 @@ func TestMPARejectOnFirst(t *testing.T) {
 	requireDockerStack(t)
 	ctx := newTestContext(t)
 	_ = ctx
-	
+
 	t.Log("BLOCKED: B1 not implemented")
 	t.Skip("Awaiting B1 (server)")
-	
+
 	// TODO: Implementation when dependencies ready:
 	// 1. Create MPA with reject_policy=reject_on_first
 	// 2. One device rejects
@@ -160,10 +159,10 @@ func TestMPAContinueOnReject(t *testing.T) {
 	requireDockerStack(t)
 	ctx := newTestContext(t)
 	_ = ctx
-	
+
 	t.Log("BLOCKED: B1 not implemented")
 	t.Skip("Awaiting B1 (server)")
-	
+
 	// TODO: Implementation when dependencies ready:
 	// 1. Create MPA with reject_policy=continue
 	// 2. One device rejects
@@ -179,10 +178,10 @@ func TestMPATimeout(t *testing.T) {
 	requireDockerStack(t)
 	ctx := newTestContext(t)
 	_ = ctx
-	
+
 	t.Log("BLOCKED: B1 not implemented")
 	t.Skip("Awaiting B1 (server)")
-	
+
 	// TODO: Implementation when dependencies ready:
 	// 1. Create MPA with short timeout
 	// 2. Only 1 group approves
@@ -198,10 +197,10 @@ func TestMPAConcurrentApprovalRace(t *testing.T) {
 	requireDockerStack(t)
 	ctx := newTestContext(t)
 	_ = ctx
-	
+
 	t.Log("BLOCKED: B1 not implemented")
 	t.Skip("Awaiting B1 (server)")
-	
+
 	// TODO: Implementation when dependencies ready:
 	// 1. Create MPA with 3 groups, required=2
 	// 2. Groups 0 and 1 approve concurrently (goroutines)

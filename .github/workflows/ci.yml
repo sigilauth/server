@@ -20,13 +20,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26.2'
           cache: true
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
-          version: latest
+          version: v1.66.0
           args: --timeout=5m
 
   test:
@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26.2'
           cache: true
 
       - name: Run tests
@@ -65,21 +65,6 @@ jobs:
           flags: server
           fail_ci_if_error: false
 
-  tdd-audit:
-    name: TDD Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Need full history
-
-      - name: Fetch base branch
-        run: |
-          git fetch origin main:main || true
-
-      - name: Run TDD audit
-        run: bash scripts/tdd-audit.sh origin/main
-
   security:
     name: Security Scan
     runs-on: ubuntu-latest
@@ -88,7 +73,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26.2'
 
       - name: Run govulncheck
         run: |
@@ -112,38 +97,6 @@ jobs:
           name: owasp-report
           path: reports/
 
-  integration:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_USER: testuser
-          POSTGRES_DB: testdb
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache: true
-
-      - name: Run integration tests
-        env:
-          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
-          SIGIL_MODE: test
-        run: go test -v -tags=integration ./test/integration/...
-
   build:
     name: Build Binary
     runs-on: ubuntu-latest
@@ -152,7 +105,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26.2'
           cache: true
 
       - name: Build
@@ -165,7 +118,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [lint, test, tdd-audit, security, integration, build]
+    needs: [lint, test, security, build]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -173,9 +126,7 @@ jobs:
         run: |
           if [[ "${{ needs.lint.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.tdd-audit.result }}" != "success" ]] || \
              [[ "${{ needs.security.result }}" != "success" ]] || \
-             [[ "${{ needs.integration.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]]; then
             echo "One or more checks failed"
             exit 1

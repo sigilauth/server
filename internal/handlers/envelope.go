@@ -41,17 +41,17 @@ func (h *EnvelopeHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	payload, clientPub, err := envelope.DecryptRequest(h.serverPrivKey, req.Envelope)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "ENVELOPE_INVALID", "failed to decrypt or verify envelope")
+		writeError(w, http.StatusBadRequest, "ENVELOPE_INVALID", "envelope verification failed")
 		return
 	}
 
 	if !replay.VerifyTimestamp(r.Context(), payload.Timestamp, h.timestampWindow) {
-		writeError(w, http.StatusBadRequest, "TIMESTAMP_EXPIRED", "timestamp outside 300s window")
+		writeError(w, http.StatusBadRequest, "ENVELOPE_INVALID", "envelope verification failed")
 		return
 	}
 
 	if !h.nonceStore.Check(payload.Nonce) {
-		writeError(w, http.StatusBadRequest, "NONCE_REUSED", "nonce already seen")
+		writeError(w, http.StatusBadRequest, "ENVELOPE_INVALID", "envelope verification failed")
 		return
 	}
 
@@ -60,7 +60,7 @@ func (h *EnvelopeHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	expectedAudience := hex.EncodeToString(serverFingerprint)
 
 	if payload.Audience != expectedAudience {
-		writeError(w, http.StatusBadRequest, "AUDIENCE_MISMATCH", "audience does not match server")
+		writeError(w, http.StatusBadRequest, "ENVELOPE_INVALID", "envelope verification failed")
 		return
 	}
 	_ = serverPubCompressed

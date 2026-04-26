@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	"github.com/sigilauth/server/internal/crypto"
 )
 
@@ -26,6 +27,12 @@ type ResponsePayload struct {
 
 type InnerEnvelope struct {
 	ClientPublicKey string `json:"client_public_key"`
+	Payload         string `json:"payload"`
+	Signature       string `json:"signature"`
+}
+
+type ResponseInnerEnvelope struct {
+	ServerPublicKey string `json:"server_public_key"`
 	Payload         string `json:"payload"`
 	Signature       string `json:"signature"`
 }
@@ -91,8 +98,8 @@ func EncryptResponse(serverPrivateKey *ecdsa.PrivateKey, clientPub *ecdsa.Public
 
 	serverPubCompressed := crypto.CompressPublicKey(&serverPrivateKey.PublicKey)
 
-	inner := InnerEnvelope{
-		ClientPublicKey: base64.StdEncoding.EncodeToString(serverPubCompressed),
+	inner := ResponseInnerEnvelope{
+		ServerPublicKey: base64.StdEncoding.EncodeToString(serverPubCompressed),
 		Payload:         string(payloadJSON),
 		Signature:       base64.StdEncoding.EncodeToString(signature),
 	}
@@ -112,5 +119,9 @@ func EncryptResponse(serverPrivateKey *ecdsa.PrivateKey, clientPub *ecdsa.Public
 }
 
 func canonicalJSON(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
+	jsonBytes, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return jsoncanonicalizer.Transform(jsonBytes)
 }

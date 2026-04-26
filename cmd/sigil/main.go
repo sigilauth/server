@@ -96,6 +96,7 @@ func main() {
 	// Create handlers
 	h := handlers.New(sessionStore, tel, identity.PrivateKey)
 	pairHandler := handlers.NewPairHandler(pairStore, identity.PrivateKey, identity.ServerID)
+	envelopeHandler := handlers.NewEnvelopeHandler(identity.PrivateKey)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()
@@ -112,6 +113,9 @@ func main() {
 	// Pair endpoints (plaintext JSON, no auth required per spec)
 	mux.HandleFunc("/pair/init", pairHandler.Init)
 	mux.HandleFunc("/pair/complete", pairHandler.Complete)
+
+	// Envelope endpoint (post-pair encrypted communication)
+	mux.HandleFunc("/envelope", envelopeHandler.Handle)
 
 	// Info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {

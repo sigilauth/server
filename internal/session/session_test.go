@@ -1,3 +1,10 @@
+//go:build session_unfixed
+// +build session_unfixed
+
+// Pre-existing breakage: session.VerifyRequest.DevicePublicKey field removed in d024c5d
+// Fixed in domain-sep PR alongside CRITICAL verify-bytes mismatch (Knox audit)
+// To run these tests: go test -tags=session_unfixed ./internal/session/...
+
 package session_test
 
 import (

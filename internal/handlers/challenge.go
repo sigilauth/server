@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sigilauth/server/internal/apikey"
 	"github.com/sigilauth/server/internal/session"
 )
 
@@ -186,6 +187,16 @@ func (h *Handler) Respond(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusUnauthorized, "SIGNATURE_INVALID", errMsg)
 		return
+	}
+
+	// Fire challenge.verified webhook (async, don't block response)
+	keyID := apikey.GetKeyIDFromContext(r.Context())
+	if keyID != "" {
+		h.deliverWebhook(keyID, "challenge.verified", map[string]interface{}{
+			"event":        "challenge.verified",
+			"challenge_id": req.ChallengeID,
+			"fingerprint":  req.Fingerprint,
+		})
 	}
 
 	resp := RespondResponse{

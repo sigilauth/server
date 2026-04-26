@@ -44,12 +44,13 @@ func loadSSRFFixtures(t *testing.T, filename string) *SSRFTestFixture {
 func findProjectRoot(t *testing.T) string {
 	dir, _ := os.Getwd()
 	for i := 0; i < 10; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "security", "test-vectors")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}
 		dir = filepath.Dir(dir)
 	}
-	return "/Volumes/Expansion/src/sigilauth"
+	t.Skip("could not find project root (go.mod)")
+	return ""
 }
 
 // TestSSRFBlockedURLs tests that all blocked URLs are rejected per knox-threat-model.md §8.1

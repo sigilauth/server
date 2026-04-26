@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/sigilauth/server/internal/apikey"
 	"github.com/sigilauth/server/internal/crypto"
 )
 
@@ -59,6 +60,15 @@ func (h *Handler) SecureDecrypt(w http.ResponseWriter, r *http.Request) {
 
 	// Encode plaintext as base64
 	plaintextB64 := base64.StdEncoding.EncodeToString(plaintext)
+
+	// Fire decrypt.completed webhook (async, don't block response)
+	keyID := apikey.GetKeyIDFromContext(r.Context())
+	if keyID != "" {
+		h.deliverWebhook(keyID, "decrypt.completed", map[string]interface{}{
+			"event": "decrypt.completed",
+			"salt":  req.Salt, // Return salt for context correlation
+		})
+	}
 
 	resp := DecryptResponse{
 		Plaintext: plaintextB64,

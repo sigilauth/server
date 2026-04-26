@@ -16,11 +16,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/sigilauth/server/internal/apikey"
 	"github.com/sigilauth/server/internal/handlers"
 	"github.com/sigilauth/server/internal/initwizard"
+	"github.com/sigilauth/server/internal/ratelimit"
 	"github.com/sigilauth/server/internal/session"
 	"github.com/sigilauth/server/internal/telemetry"
 )
@@ -62,6 +65,13 @@ func main() {
 
 	log.Printf("Server ID: %s", identity.ServerID)
 	log.Printf("Pictogram: %s", identity.PictogramSpeakable)
+
+	// Load API keys (fail-closed: if no keys loaded, exit)
+	apiKeyStore := loadAPIKeys()
+	log.Printf("Loaded %d API key(s)", len(apiKeyStore.ListKeys(ctx)))
+
+	// Create rate limiter
+	rateLimiter := ratelimit.NewLimiter()
 
 	// Create session store
 	sessionStore := session.NewStore()
@@ -105,22 +115,38 @@ func main() {
 		})
 	})
 
-	// Challenge endpoints
-	mux.HandleFunc("/challenge", h.CreateChallenge)
-	mux.HandleFunc("/respond", h.Respond)
-	mux.HandleFunc("/v1/auth/challenge/", h.GetChallengeStatus)
+	// Challenge endpoints (protected with auth + rate limiting)
+	requireAuth := apikey.RequireAPIKey(apiKeyStore)
 
-	// MPA endpoints
-	mux.HandleFunc("/mpa/request", h.CreateMPARequest)
-	mux.HandleFunc("/mpa/respond", h.RespondMPA)
-	mux.HandleFunc("/mpa/status/", h.GetMPAStatus)
+	challengeRL := ratelimit.RateLimit(rateLimiter, "/challenge")
+	mux.Handle("/challenge", requireAuth(challengeRL(http.HandlerFunc(h.CreateChallenge))))
 
-	// Secure decrypt endpoints
-	mux.HandleFunc("/v1/secure/decrypt", h.SecureDecrypt)
-	mux.HandleFunc("/v1/secure/decrypt/", h.GetDecryptStatus)
+	respondRL := ratelimit.RateLimit(rateLimiter, "/respond")
+	mux.Handle("/respond", requireAuth(respondRL(http.HandlerFunc(h.Respond))))
 
-	// Webhook configuration
-	mux.HandleFunc("/v1/config/webhooks", h.ConfigureWebhook)
+	challengeStatusRL := ratelimit.RateLimit(rateLimiter, "/v1/auth/challenge/:id/status")
+	mux.Handle("/v1/auth/challenge/", requireAuth(challengeStatusRL(http.HandlerFunc(h.GetChallengeStatus))))
+
+	// MPA endpoints (protected with auth + rate limiting)
+	mpaRequestRL := ratelimit.RateLimit(rateLimiter, "/mpa/request")
+	mux.Handle("/mpa/request", requireAuth(mpaRequestRL(http.HandlerFunc(h.CreateMPARequest))))
+
+	mpaRespondRL := ratelimit.RateLimit(rateLimiter, "/mpa/respond")
+	mux.Handle("/mpa/respond", requireAuth(mpaRespondRL(http.HandlerFunc(h.RespondMPA))))
+
+	mpaStatusRL := ratelimit.RateLimit(rateLimiter, "/mpa/status/:id")
+	mux.Handle("/mpa/status/", requireAuth(mpaStatusRL(http.HandlerFunc(h.GetMPAStatus))))
+
+	// Secure decrypt endpoints (protected with auth + rate limiting)
+	secureDecryptRL := ratelimit.RateLimit(rateLimiter, "/v1/secure/decrypt")
+	mux.Handle("/v1/secure/decrypt", requireAuth(secureDecryptRL(http.HandlerFunc(h.SecureDecrypt))))
+
+	decryptStatusRL := ratelimit.RateLimit(rateLimiter, "/v1/secure/decrypt/:id/status")
+	mux.Handle("/v1/secure/decrypt/", requireAuth(decryptStatusRL(http.HandlerFunc(h.GetDecryptStatus))))
+
+	// Webhook configuration (protected with auth + rate limiting)
+	webhookRL := ratelimit.RateLimit(rateLimiter, "/v1/config/webhooks")
+	mux.Handle("/v1/config/webhooks", requireAuth(webhookRL(http.HandlerFunc(h.ConfigureWebhook))))
 
 	// Metrics endpoint
 	mux.Handle("/metrics", tel.MetricsHandler())
@@ -340,5 +366,62 @@ func generateSelfSignedCert(certFile, keyFile string) error {
 		return fmt.Errorf("failed to write key: %w", err)
 	}
 
+	return nil
+}
+
+// loadAPIKeys loads API keys from environment variables.
+//
+// Supports two formats:
+// 1. SIGIL_API_KEYS: comma-separated keyID=key pairs
+//    Example: prod=sgk_live_abc...,staging=sgk_live_def...
+// 2. SIGIL_API_KEYS_FILE: path to JSON file with {"keyID": "key"} pairs
+//
+// Fail-closed: if no keys loaded, logs fatal and exits.
+func loadAPIKeys() *apikey.Store {
+	// Try inline env var first
+	inlineKeys := os.Getenv("SIGIL_API_KEYS")
+	if inlineKeys != "" {
+		keyMap := make(map[string]string)
+		pairs := strings.Split(inlineKeys, ",")
+		for _, pair := range pairs {
+			parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+			if len(parts) != 2 {
+				log.Printf("Warning: invalid key pair format: %s", pair)
+				continue
+			}
+			keyID := strings.TrimSpace(parts[0])
+			key := strings.TrimSpace(parts[1])
+			if keyID == "" || key == "" {
+				log.Printf("Warning: empty keyID or key in pair: %s", pair)
+				continue
+			}
+			keyMap[keyID] = key
+		}
+
+		if len(keyMap) > 0 {
+			return apikey.LoadFromMap(keyMap)
+		}
+	}
+
+	// Try file-based loading
+	keyFile := os.Getenv("SIGIL_API_KEYS_FILE")
+	if keyFile != "" {
+		data, err := os.ReadFile(keyFile)
+		if err != nil {
+			log.Fatalf("Failed to read API keys file %s: %v", keyFile, err)
+		}
+
+		var keyMap map[string]string
+		if err := json.Unmarshal(data, &keyMap); err != nil {
+			log.Fatalf("Failed to parse API keys file %s: %v", keyFile, err)
+		}
+
+		if len(keyMap) > 0 {
+			return apikey.LoadFromMap(keyMap)
+		}
+	}
+
+	// Fail-closed: no keys loaded
+	log.Fatal("No API keys configured. Set SIGIL_API_KEYS or SIGIL_API_KEYS_FILE environment variable.")
 	return nil
 }

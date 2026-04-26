@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sigilauth/server/internal/apikey"
 	"github.com/sigilauth/server/internal/mpa"
 )
 
@@ -140,6 +141,19 @@ func (h *Handler) RespondMPA(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusBadRequest, "MPA_RESPONSE_FAILED", err.Error())
 		return
+	}
+
+	// Fire mpa.approved webhook if MPA request is fully approved (async, don't block response)
+	if mpaReq.Status == "approved" {
+		keyID := apikey.GetKeyIDFromContext(r.Context())
+		if keyID != "" {
+			h.deliverWebhook(keyID, "mpa.approved", map[string]interface{}{
+				"event":      "mpa.approved",
+				"request_id": mpaReq.RequestID,
+				"required":   mpaReq.Required,
+				"approved":   len(mpaReq.GroupsSatisfied),
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

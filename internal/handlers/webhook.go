@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sigilauth/server/internal/apikey"
 )
 
 // WebhookConfigStore manages webhook configurations in memory.
@@ -121,14 +122,15 @@ func (h *Handler) ConfigureWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract API key from Authorization header
-	// Format: "Bearer <api-key>"
-	apiKey := extractAPIKey(r)
-	if apiKey == "" {
-		apiKey = "default" // Fallback for tests without auth
+	// Extract API key ID from context (set by middleware)
+	keyID := apikey.GetKeyIDFromContext(r.Context())
+	if keyID == "" {
+		// This should never happen if middleware is wired correctly
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing API key ID in context")
+		return
 	}
 
-	// Store webhook config (overwrites existing config for this API key)
+	// Store webhook config (overwrites existing config for this key ID)
 	webhookID := "whk_" + uuid.New().String()
 	config := &WebhookConfig{
 		WebhookID: webhookID,
@@ -140,7 +142,7 @@ func (h *Handler) ConfigureWebhook(w http.ResponseWriter, r *http.Request) {
 
 	store := getWebhookStore()
 	store.mu.Lock()
-	store.configs[apiKey] = config
+	store.configs[keyID] = config
 	store.mu.Unlock()
 
 	// Return response
@@ -156,19 +158,10 @@ func (h *Handler) ConfigureWebhook(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// extractAPIKey extracts the API key from Authorization header
-func extractAPIKey(r *http.Request) string {
-	auth := r.Header.Get("Authorization")
-	if len(auth) > 7 && auth[:7] == "Bearer " {
-		return auth[7:]
-	}
-	return ""
-}
-
-// GetWebhookConfig retrieves webhook config for an API key (internal use)
-func (h *Handler) GetWebhookConfig(apiKey string) *WebhookConfig {
+// GetWebhookConfig retrieves webhook config for a key ID (internal use)
+func (h *Handler) GetWebhookConfig(keyID string) *WebhookConfig {
 	store := getWebhookStore()
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return store.configs[apiKey]
+	return store.configs[keyID]
 }

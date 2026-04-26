@@ -17,14 +17,17 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Knox §4 rate limits
+// Knox §4 rate limits (per-API-key for integrator endpoints)
 var endpointLimits = map[string]limitConfig{
-	"POST /v1/auth/challenge":            {requests: 100, window: 15 * time.Minute, scope: "ip"},
-	"POST /v1/auth/respond":              {requests: 100, window: 15 * time.Minute, scope: "fingerprint"},
-	"POST /v1/mpa/request":               {requests: 50, window: 15 * time.Minute, scope: "apikey"},
-	"POST /v1/secure/decrypt":            {requests: 50, window: 15 * time.Minute, scope: "fingerprint"},
-	"GET /v1/auth/challenge/:id/status":  {requests: 1000, window: 1 * time.Hour, scope: "apikey"},
-	"GET /info":                          {requests: 1000, window: 1 * time.Hour, scope: "ip"},
+	"POST /challenge":                      {requests: 100, window: 15 * time.Minute, scope: "apikey"},
+	"POST /respond":                        {requests: 100, window: 15 * time.Minute, scope: "apikey"},
+	"GET /v1/auth/challenge/:id/status":    {requests: 1000, window: 1 * time.Hour, scope: "apikey"},
+	"POST /mpa/request":                    {requests: 50, window: 15 * time.Minute, scope: "apikey"},
+	"POST /mpa/respond":                    {requests: 50, window: 15 * time.Minute, scope: "apikey"},
+	"GET /mpa/status/:id":                  {requests: 1000, window: 1 * time.Hour, scope: "apikey"},
+	"POST /v1/secure/decrypt":              {requests: 50, window: 15 * time.Minute, scope: "apikey"},
+	"GET /v1/secure/decrypt/:id/status":    {requests: 1000, window: 1 * time.Hour, scope: "apikey"},
+	"POST /v1/config/webhooks":             {requests: 50, window: 15 * time.Minute, scope: "apikey"},
 }
 
 type limitConfig struct {

@@ -16,12 +16,13 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	plaintext := []byte("secret message for ECIES encryption")
-	salt := []byte("request-id-12345")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-decrypt-v1"
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 	require.NoError(t, err)
 
-	decrypted, err := crypto.Decrypt(recipientKey, ciphertext, salt)
+	decrypted, err := crypto.Decrypt(recipientKey, ciphertext, fingerprint, context)
 	require.NoError(t, err)
 
 	assert.Equal(t, plaintext, decrypted)
@@ -30,9 +31,9 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 func TestEncryptProducesValidCiphertext(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	plaintext := []byte("test data")
-	salt := []byte("salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, "sigil-test-v1")
 	require.NoError(t, err)
 
 	assert.Greater(t, len(ciphertext), len(plaintext),
@@ -46,10 +47,11 @@ func TestEncryptProducesValidCiphertext(t *testing.T) {
 func TestEncryptDifferentEphemeralKeys(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	plaintext := []byte("same message")
-	salt := []byte("same salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-test-v1"
 
-	ct1, err1 := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
-	ct2, err2 := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ct1, err1 := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
+	ct2, err2 := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 
 	require.NoError(t, err1)
 	require.NoError(t, err2)
@@ -57,8 +59,8 @@ func TestEncryptDifferentEphemeralKeys(t *testing.T) {
 	assert.NotEqual(t, ct1, ct2,
 		"ciphertexts should differ due to random ephemeral key and nonce")
 
-	decrypted1, _ := crypto.Decrypt(recipientKey, ct1, salt)
-	decrypted2, _ := crypto.Decrypt(recipientKey, ct2, salt)
+	decrypted1, _ := crypto.Decrypt(recipientKey, ct1, fingerprint, context)
+	decrypted2, _ := crypto.Decrypt(recipientKey, ct2, fingerprint, context)
 
 	assert.Equal(t, plaintext, decrypted1)
 	assert.Equal(t, plaintext, decrypted2)
@@ -66,7 +68,8 @@ func TestEncryptDifferentEphemeralKeys(t *testing.T) {
 
 func TestDecryptInvalidCiphertext(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	salt := []byte("salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-test-v1"
 
 	tests := []struct {
 		name       string
@@ -92,7 +95,7 @@ func TestDecryptInvalidCiphertext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := crypto.Decrypt(recipientKey, tt.ciphertext, salt)
+			_, err := crypto.Decrypt(recipientKey, tt.ciphertext, fingerprint, context)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantError)
 		})
@@ -102,16 +105,17 @@ func TestDecryptInvalidCiphertext(t *testing.T) {
 func TestDecryptModifiedCiphertext(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	plaintext := []byte("original message")
-	salt := []byte("salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-test-v1"
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 	require.NoError(t, err)
 
 	modifiedCiphertext := make([]byte, len(ciphertext))
 	copy(modifiedCiphertext, ciphertext)
 	modifiedCiphertext[len(modifiedCiphertext)-1] ^= 0x01
 
-	_, err = crypto.Decrypt(recipientKey, modifiedCiphertext, salt)
+	_, err = crypto.Decrypt(recipientKey, modifiedCiphertext, fingerprint, context)
 	assert.Error(t, err, "modified ciphertext should fail authentication")
 }
 
@@ -120,37 +124,55 @@ func TestDecryptWrongKey(t *testing.T) {
 	recipientKey2, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
 	plaintext := []byte("secret")
-	salt := []byte("salt")
+	fingerprint1 := crypto.FingerprintFromPublicKey(&recipientKey1.PublicKey)
+	fingerprint2 := crypto.FingerprintFromPublicKey(&recipientKey2.PublicKey)
+	context := "sigil-test-v1"
 
-	ciphertext, err := crypto.Encrypt(&recipientKey1.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey1.PublicKey, plaintext, fingerprint1, context)
 	require.NoError(t, err)
 
-	_, err = crypto.Decrypt(recipientKey2, ciphertext, salt)
+	_, err = crypto.Decrypt(recipientKey2, ciphertext, fingerprint2, context)
 	assert.Error(t, err, "decryption with wrong key should fail")
 }
 
-func TestDecryptWrongSalt(t *testing.T) {
+func TestDecryptWrongFingerprint(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	plaintext := []byte("secret")
-	salt1 := []byte("original-salt")
-	salt2 := []byte("different-salt")
+	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt1)
+	plaintext := []byte("secret")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	wrongFingerprint := crypto.FingerprintFromPublicKey(&otherKey.PublicKey)
+	context := "sigil-test-v1"
+
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 	require.NoError(t, err)
 
-	_, err = crypto.Decrypt(recipientKey, ciphertext, salt2)
-	assert.Error(t, err, "decryption with wrong salt should fail")
+	_, err = crypto.Decrypt(recipientKey, ciphertext, wrongFingerprint, context)
+	assert.Error(t, err, "decryption with wrong fingerprint should fail")
+}
+
+func TestDecryptWrongContext(t *testing.T) {
+	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	plaintext := []byte("secret")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, "sigil-test-v1")
+	require.NoError(t, err)
+
+	_, err = crypto.Decrypt(recipientKey, ciphertext, fingerprint, "sigil-wrong-v1")
+	assert.Error(t, err, "decryption with wrong context should fail")
 }
 
 func TestEncryptEmptyPlaintext(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	plaintext := []byte{}
-	salt := []byte("salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-test-v1"
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 	require.NoError(t, err)
 
-	decrypted, err := crypto.Decrypt(recipientKey, ciphertext, salt)
+	decrypted, err := crypto.Decrypt(recipientKey, ciphertext, fingerprint, context)
 	require.NoError(t, err)
 
 	assert.Len(t, decrypted, 0, "empty plaintext should decrypt to empty (nil or []byte{})")
@@ -162,12 +184,13 @@ func TestEncryptLargePlaintext(t *testing.T) {
 	for i := range plaintext {
 		plaintext[i] = byte(i % 256)
 	}
-	salt := []byte("salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-test-v1"
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 	require.NoError(t, err)
 
-	decrypted, err := crypto.Decrypt(recipientKey, ciphertext, salt)
+	decrypted, err := crypto.Decrypt(recipientKey, ciphertext, fingerprint, context)
 	require.NoError(t, err)
 
 	assert.Equal(t, plaintext, decrypted)
@@ -176,9 +199,10 @@ func TestEncryptLargePlaintext(t *testing.T) {
 func TestECIESCiphertextFormat(t *testing.T) {
 	recipientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	plaintext := []byte("test")
-	salt := []byte("salt")
+	fingerprint := crypto.FingerprintFromPublicKey(&recipientKey.PublicKey)
+	context := "sigil-test-v1"
 
-	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, salt)
+	ciphertext, err := crypto.Encrypt(&recipientKey.PublicKey, plaintext, fingerprint, context)
 	require.NoError(t, err)
 
 	assert.Len(t, ciphertext[:33], 33, "first 33 bytes are ephemeral public key")

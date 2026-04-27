@@ -11,22 +11,28 @@ import (
 
 // Encrypt encrypts plaintext using ECIES (Elliptic Curve Integrated Encryption Scheme).
 //
-// Algorithm per spec §2.3 (SIGIL-CONV-V1):
+// Algorithm per protocol-spec §4.8.1:
 // 1. Generate ephemeral P-256 keypair
 // 2. ECDH(ephemeral_private, recipient_public) → shared_point
 // 3. shared_secret = shared_point.x (raw, no hash)
-// 4. encryption_key = HKDF(ikm=shared_secret, salt=recipient_fingerprint, info="SIGIL-CONV-V1-AES256", length=32)
+// 4. encryption_key = HKDF(ikm=shared_secret, salt=ephemeral_public, info=context, length=32)
 // 5. nonce = random 12 bytes
-// 6. ciphertext = AES-256-GCM.encrypt(key=encryption_key, nonce=nonce, plaintext=plaintext, aad=ephemeral_public)
+// 6. ciphertext = AES-256-GCM.encrypt(key=encryption_key, nonce=nonce, plaintext=plaintext, aad=fingerprint)
+//
+// Parameters:
+// - recipientPublicKey: Recipient's P-256 public key
+// - plaintext: Data to encrypt
+// - fingerprint: Recipient's key fingerprint (used as AAD for binding)
+// - context: HKDF info string (e.g., "sigil-decrypt-v1", "sigil-mnemonic-init-v1")
 //
 // Returns: ephemeral_public_key (33 bytes) || nonce (12 bytes) || ciphertext || tag (16 bytes)
-//
-// Salt must be the recipient's public key fingerprint (SHA256 of compressed pubkey).
-func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byte, error) {
+func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, fingerprint []byte, context string) ([]byte, error) {
 	ephemeralPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
 	}
+
+	ephemeralPublicKeyCompressed := CompressPublicKey(&ephemeralPrivateKey.PublicKey)
 
 	sharedX, _ := recipientPublicKey.Curve.ScalarMult(
 		recipientPublicKey.X,
@@ -34,7 +40,7 @@ func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byt
 		ephemeralPrivateKey.D.Bytes(),
 	)
 
-	encryptionKey, err := DeriveKey(sharedX.Bytes(), salt, "SIGIL-CONV-V1-AES256", 32)
+	encryptionKey, err := DeriveKey(sharedX.Bytes(), ephemeralPublicKeyCompressed, context, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive encryption key: %w", err)
 	}
@@ -54,10 +60,7 @@ func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byt
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	ephemeralPublicKeyCompressed := CompressPublicKey(&ephemeralPrivateKey.PublicKey)
-
-	// AAD = ephemeral_public per spec §2.3 (SIGIL-CONV-V1)
-	ciphertextAndTag := gcm.Seal(nil, nonce, plaintext, ephemeralPublicKeyCompressed)
+	ciphertextAndTag := gcm.Seal(nil, nonce, plaintext, fingerprint)
 
 	result := make([]byte, 0, 33+12+len(ciphertextAndTag))
 	result = append(result, ephemeralPublicKeyCompressed...)
@@ -71,15 +74,21 @@ func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byt
 //
 // Ciphertext format: ephemeral_public_key (33) || nonce (12) || ciphertext || tag (16)
 //
-// Algorithm per spec §2.3 (SIGIL-CONV-V1):
+// Algorithm per protocol-spec §4.8.1:
 // 1. Extract ephemeral public key, nonce, ciphertext+tag
 // 2. ECDH(recipient_private, ephemeral_public) → shared_point
 // 3. shared_secret = shared_point.x (raw, no hash)
-// 4. encryption_key = HKDF(ikm=shared_secret, salt=recipient_fingerprint, info="SIGIL-CONV-V1-AES256", length=32)
-// 5. plaintext = AES-256-GCM.decrypt(key=encryption_key, nonce=nonce, ciphertext=ciphertext, aad=ephemeral_public)
+// 4. encryption_key = HKDF(ikm=shared_secret, salt=ephemeral_public, info=context, length=32)
+// 5. plaintext = AES-256-GCM.decrypt(key=encryption_key, nonce=nonce, ciphertext=ciphertext, aad=fingerprint)
 //
-// Returns error if authentication fails (modified ciphertext, wrong key, wrong salt).
-func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, salt []byte) ([]byte, error) {
+// Parameters:
+// - recipientPrivateKey: Recipient's P-256 private key
+// - ciphertext: ECIES-encrypted data
+// - fingerprint: Recipient's key fingerprint (used as AAD for binding)
+// - context: HKDF info string (must match what was used in Encrypt)
+//
+// Returns error if authentication fails (modified ciphertext, wrong key, wrong fingerprint).
+func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, fingerprint []byte, context string) ([]byte, error) {
 	minLength := 33 + 12 + 16
 	if len(ciphertext) < minLength {
 		return nil, fmt.Errorf("ciphertext too short: need at least %d bytes, got %d", minLength, len(ciphertext))
@@ -100,7 +109,7 @@ func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, salt []byte) ([]
 		recipientPrivateKey.D.Bytes(),
 	)
 
-	encryptionKey, err := DeriveKey(sharedX.Bytes(), salt, "SIGIL-CONV-V1-AES256", 32)
+	encryptionKey, err := DeriveKey(sharedX.Bytes(), ephemeralPublicKeyCompressed, context, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive encryption key: %w", err)
 	}
@@ -115,8 +124,7 @@ func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, salt []byte) ([]
 		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	// AAD = ephemeral_public per spec §2.3 (SIGIL-CONV-V1)
-	plaintext, err := gcm.Open(nil, nonce, ciphertextAndTag, ephemeralPublicKeyCompressed)
+	plaintext, err := gcm.Open(nil, nonce, ciphertextAndTag, fingerprint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt: authentication failed or wrong key")
 	}

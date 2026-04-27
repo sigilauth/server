@@ -48,7 +48,7 @@ func DecryptRequest(serverPrivateKey *ecdsa.PrivateKey, envelopeB64 string) (*Re
 	}
 
 	fingerprint := crypto.FingerprintFromPublicKey(&serverPrivateKey.PublicKey)
-	innerJSON, err := crypto.Decrypt(serverPrivateKey, ciphertext, fingerprint)
+	innerJSON, err := crypto.Decrypt(serverPrivateKey, ciphertext, fingerprint, "sigil-envelope-v1")
 	if err != nil {
 		return nil, nil, fmt.Errorf("ECIES decrypt failed: %w", err)
 	}
@@ -110,7 +110,7 @@ func EncryptResponse(serverPrivateKey *ecdsa.PrivateKey, clientPub *ecdsa.Public
 	}
 
 	fingerprint := crypto.FingerprintFromPublicKey(clientPub)
-	ciphertext, err := crypto.Encrypt(clientPub, innerJSON, fingerprint)
+	ciphertext, err := crypto.Encrypt(clientPub, innerJSON, fingerprint, "sigil-envelope-v1")
 	if err != nil {
 		return "", fmt.Errorf("ECIES encrypt failed: %w", err)
 	}

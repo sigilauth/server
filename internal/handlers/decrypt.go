@@ -12,7 +12,6 @@ import (
 // DecryptRequest matches OpenAPI schema for /v1/secure/decrypt
 type DecryptRequest struct {
 	Ciphertext string `json:"ciphertext"` // Base64-encoded ECIES ciphertext
-	Salt       string `json:"salt"`       // Base64-encoded salt (e.g., request_id for context binding)
 }
 
 // DecryptResponse matches OpenAPI schema
@@ -43,16 +42,11 @@ func (h *Handler) SecureDecrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode base64 salt
-	salt, err := base64.StdEncoding.DecodeString(req.Salt)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_SALT", "Salt must be base64")
-		return
-	}
-
-	// Decrypt using server's private key
+	// Decrypt using server's private key with protocol-spec §4.8.1 compliant ECIES
 	// Ciphertext format: ephemeral_public_key (33) || nonce (12) || ciphertext || tag (16)
-	plaintext, err := crypto.Decrypt(h.serverKey, ciphertext, salt)
+	// HKDF: salt=ephemeral_public, info="sigil-decrypt-v1", AAD=server_fingerprint
+	fingerprint := crypto.FingerprintFromPublicKey(&h.serverKey.PublicKey)
+	plaintext, err := crypto.Decrypt(h.serverKey, ciphertext, fingerprint, "sigil-decrypt-v1")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "DECRYPTION_FAILED", err.Error())
 		return
@@ -66,7 +60,6 @@ func (h *Handler) SecureDecrypt(w http.ResponseWriter, r *http.Request) {
 	if keyID != "" {
 		h.deliverWebhook(keyID, "decrypt.completed", map[string]interface{}{
 			"event": "decrypt.completed",
-			"salt":  req.Salt, // Return salt for context correlation
 		})
 	}
 

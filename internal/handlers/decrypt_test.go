@@ -46,7 +46,6 @@ func TestSecureDecrypt_InvalidCiphertext(t *testing.T) {
 
 	reqBody := DecryptRequest{
 		Ciphertext: "not-base64!!!",
-		Salt:       base64.StdEncoding.EncodeToString([]byte("salt")),
 	}
 
 	body, _ := json.Marshal(reqBody)
@@ -66,30 +65,6 @@ func TestSecureDecrypt_InvalidCiphertext(t *testing.T) {
 	}
 }
 
-func TestSecureDecrypt_InvalidSalt(t *testing.T) {
-	handler, _ := setupHandler(t)
-
-	reqBody := DecryptRequest{
-		Ciphertext: base64.StdEncoding.EncodeToString([]byte("ciphertext")),
-		Salt:       "not-base64!!!",
-	}
-
-	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/v1/secure/decrypt", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-
-	handler.SecureDecrypt(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400, got %d", w.Code)
-	}
-
-	var errResp map[string]string
-	json.NewDecoder(w.Body).Decode(&errResp)
-	if errResp["error"] != "INVALID_SALT" {
-		t.Errorf("Expected error code INVALID_SALT, got %s", errResp["error"])
-	}
-}
 
 func TestSecureDecrypt_DecryptionFailed(t *testing.T) {
 	handler, _ := setupHandler(t)
@@ -97,7 +72,6 @@ func TestSecureDecrypt_DecryptionFailed(t *testing.T) {
 	// Valid base64 but invalid ciphertext (will fail decryption)
 	reqBody := DecryptRequest{
 		Ciphertext: base64.StdEncoding.EncodeToString([]byte("invalid ciphertext data")),
-		Salt:       base64.StdEncoding.EncodeToString([]byte("salt")),
 	}
 
 	body, _ := json.Marshal(reqBody)

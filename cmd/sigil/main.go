@@ -113,6 +113,7 @@ func main() {
 	// Pair endpoints (plaintext JSON, no auth required per spec)
 	mux.HandleFunc("/pair/init", pairHandler.Init)
 	mux.HandleFunc("/pair/complete", pairHandler.Complete)
+	mux.HandleFunc("/pair/admin-approve/", pairHandler.AdminApprove) // Requires SIGIL_ADMIN_API_KEY bearer token
 
 	// Envelope endpoint (post-pair encrypted communication)
 	mux.HandleFunc("/envelope", envelopeHandler.Handle)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -201,7 +202,12 @@ func (h *PairHandler) AdminApprove(w http.ResponseWriter, r *http.Request) {
 
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	adminKey := os.Getenv("SIGIL_ADMIN_API_KEY")
-	if adminKey == "" || token != adminKey {
+	if adminKey == "" {
+		writeError(w, http.StatusForbidden, "INVALID_TOKEN", "SIGIL_ADMIN_API_KEY not configured")
+		return
+	}
+	// Constant-time comparison to prevent timing attacks
+	if subtle.ConstantTimeCompare([]byte(token), []byte(adminKey)) != 1 {
 		writeError(w, http.StatusForbidden, "INVALID_TOKEN", "Invalid admin API key")
 		return
 	}

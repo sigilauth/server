@@ -6,23 +6,22 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"fmt"
 )
 
 // Encrypt encrypts plaintext using ECIES (Elliptic Curve Integrated Encryption Scheme).
 //
-// Algorithm per Knox §3.5:
+// Algorithm per spec §2.3 (SIGIL-CONV-V1):
 // 1. Generate ephemeral P-256 keypair
 // 2. ECDH(ephemeral_private, recipient_public) → shared_point
-// 3. shared_secret = SHA256(shared_point.x)
-// 4. encryption_key = HKDF(ikm=shared_secret, salt=salt, info="sigil-decrypt-v1", length=32)
+// 3. shared_secret = shared_point.x (raw, no hash)
+// 4. encryption_key = HKDF(ikm=shared_secret, salt=recipient_fingerprint, info="SIGIL-CONV-V1-AES256", length=32)
 // 5. nonce = random 12 bytes
-// 6. ciphertext = AES-256-GCM.encrypt(key=encryption_key, nonce=nonce, plaintext=plaintext, aad=salt)
+// 6. ciphertext = AES-256-GCM.encrypt(key=encryption_key, nonce=nonce, plaintext=plaintext, aad=ephemeral_public)
 //
 // Returns: ephemeral_public_key (33 bytes) || nonce (12 bytes) || ciphertext || tag (16 bytes)
 //
-// Salt is typically the request_id for context binding.
+// Salt must be the recipient's public key fingerprint (SHA256 of compressed pubkey).
 func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byte, error) {
 	ephemeralPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -35,9 +34,7 @@ func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byt
 		ephemeralPrivateKey.D.Bytes(),
 	)
 
-	sharedSecret := sha256.Sum256(sharedX.Bytes())
-
-	encryptionKey, err := DeriveKey(sharedSecret[:], salt, "sigil-decrypt-v1", 32)
+	encryptionKey, err := DeriveKey(sharedX.Bytes(), salt, "SIGIL-CONV-V1-AES256", 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive encryption key: %w", err)
 	}
@@ -73,12 +70,12 @@ func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byt
 //
 // Ciphertext format: ephemeral_public_key (33) || nonce (12) || ciphertext || tag (16)
 //
-// Algorithm:
+// Algorithm per spec §2.3 (SIGIL-CONV-V1):
 // 1. Extract ephemeral public key, nonce, ciphertext+tag
 // 2. ECDH(recipient_private, ephemeral_public) → shared_point
-// 3. shared_secret = SHA256(shared_point.x)
-// 4. encryption_key = HKDF(ikm=shared_secret, salt=salt, info="sigil-decrypt-v1", length=32)
-// 5. plaintext = AES-256-GCM.decrypt(key=encryption_key, nonce=nonce, ciphertext=ciphertext, aad=salt)
+// 3. shared_secret = shared_point.x (raw, no hash)
+// 4. encryption_key = HKDF(ikm=shared_secret, salt=recipient_fingerprint, info="SIGIL-CONV-V1-AES256", length=32)
+// 5. plaintext = AES-256-GCM.decrypt(key=encryption_key, nonce=nonce, ciphertext=ciphertext, aad=ephemeral_public)
 //
 // Returns error if authentication fails (modified ciphertext, wrong key, wrong salt).
 func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, salt []byte) ([]byte, error) {
@@ -102,9 +99,7 @@ func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, salt []byte) ([]
 		recipientPrivateKey.D.Bytes(),
 	)
 
-	sharedSecret := sha256.Sum256(sharedX.Bytes())
-
-	encryptionKey, err := DeriveKey(sharedSecret[:], salt, "sigil-decrypt-v1", 32)
+	encryptionKey, err := DeriveKey(sharedX.Bytes(), salt, "SIGIL-CONV-V1-AES256", 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive encryption key: %w", err)
 	}

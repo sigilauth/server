@@ -174,6 +174,52 @@ func (h *PairHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AdminApprove handles POST /pair/admin-approve/{session_id}
+//
+// Approves a pending pair handshake. Requires admin authentication (API key with admin scope).
+// For dev/testing, set SIGIL_AUTO_APPROVE=1 env var to bypass manual approval.
+//
+// PR5: Adds missing admin approval endpoint - pairStore.Approve() had zero callers.
+func (h *PairHandler) AdminApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract session_id from URL path (expected: /pair/admin-approve/{session_id})
+	sessionID := strings.TrimPrefix(r.URL.Path, "/pair/admin-approve/")
+	if sessionID == "" || sessionID == r.URL.Path {
+		writeError(w, http.StatusBadRequest, "MISSING_SESSION_ID", "session_id path parameter required")
+		return
+	}
+
+	nonceBytes, err := base64.StdEncoding.DecodeString(sessionID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "session_id must be base64-encoded nonce")
+		return
+	}
+
+	// Verify session exists
+	pendingPair, exists := h.pairStore.Get(r.Context(), nonceBytes)
+	if !exists {
+		writeError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Pair session not found or expired")
+		return
+	}
+
+	// Approve the session
+	if err := h.pairStore.Approve(r.Context(), nonceBytes); err != nil {
+		writeError(w, http.StatusInternalServerError, "APPROVAL_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":            "approved",
+		"session_id":        sessionID,
+		"session_pictogram": pendingPair.SessionPictogram,
+		"approved_at":       time.Now().Format(time.RFC3339),
+	})
+}
+
 func (h *PairHandler) deriveSessionPictogram(serverPub, clientPub []byte) ([]byte, []string, error) {
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {

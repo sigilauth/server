@@ -37,10 +37,9 @@ func NewStore() *Store {
 	return store
 }
 
-func (s *Store) Create(ctx context.Context, clientPub []byte, pictogram []string, handshakeTTL, approvalTTL time.Duration) ([]byte, error) {
-	nonce := make([]byte, 32)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+func (s *Store) Create(ctx context.Context, nonce, clientPub []byte, pictogram []string, handshakeTTL, approvalTTL time.Duration) error {
+	if len(nonce) != 32 {
+		return fmt.Errorf("nonce must be 32 bytes, got %d", len(nonce))
 	}
 
 	nonceKey := base64.StdEncoding.EncodeToString(nonce)
@@ -58,7 +57,7 @@ func (s *Store) Create(ctx context.Context, clientPub []byte, pictogram []string
 		Approved:         false,
 	}
 
-	return nonce, nil
+	return nil
 }
 
 func (s *Store) Get(ctx context.Context, nonce []byte) (*PendingPair, bool) {

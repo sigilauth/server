@@ -89,19 +89,18 @@ func (h *PairHandler) Init(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	nonce, err := h.pairStore.Create(r.Context(), clientPubBytes, sessionPictogram, handshakeTTL, approvalTTL)
-	if err != nil {
+	// PR4 fix: Pass derivedNonce to Create (same nonce used for pictogram derivation)
+	if err := h.pairStore.Create(r.Context(), derivedNonce, clientPubBytes, sessionPictogram, handshakeTTL, approvalTTL); err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create pair")
 		return
 	}
-	_ = derivedNonce
 
 	expiresAt := time.Now().Add(handshakeTTL)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"server_id":                  h.serverID,
 		"server_public_key":          base64.StdEncoding.EncodeToString(serverPubCompressed),
-		"server_nonce":               base64.StdEncoding.EncodeToString(nonce),
+		"server_nonce":               base64.StdEncoding.EncodeToString(derivedNonce),
 		"expires_at":                 expiresAt.Format(time.RFC3339),
 		"session_pictogram":          sessionPictogram,
 		"session_pictogram_speakable": pictogram.FormatSpeakable(sessionPictogram),

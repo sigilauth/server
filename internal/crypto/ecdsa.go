@@ -3,27 +3,28 @@ package crypto
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
+
+	"github.com/codahale/rfc6979"
 )
 
 // Sign creates an ECDSA signature for the given message using the private key.
 //
-// Returns a fixed 64-byte signature (r || s) with low-S normalization per BIP-62.
-// The message is hashed with SHA-256 before signing.
+// Returns a fixed 64-byte signature (r || s) with RFC 6979 deterministic signing
+// and BIP-62 low-S normalization. The message is hashed with SHA-256 before signing.
 //
-// Low-S normalization prevents signature malleability: if S > order/2, we replace it with order - S.
+// Uses github.com/codahale/rfc6979 for deterministic nonce generation.
+// Guarantees: same private key + message = same signature (no randomness).
 func Sign(privateKey *ecdsa.PrivateKey, message []byte) ([]byte, error) {
 	hash := sha256.Sum256(message)
 
-	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
-	if err != nil {
-		return nil, fmt.Errorf("ecdsa sign failed: %w", err)
-	}
+	// RFC 6979 deterministic signing (codahale library)
+	r, s := rfc6979.SignECDSA(privateKey, hash[:], sha256.New)
 
+	// BIP-62 low-S normalization
 	curve := privateKey.Curve
 	halfOrder := HalfOrder(curve)
 
@@ -31,6 +32,7 @@ func Sign(privateKey *ecdsa.PrivateKey, message []byte) ([]byte, error) {
 		s = new(big.Int).Sub(curve.Params().N, s)
 	}
 
+	// Convert to 64-byte fixed format (r || s)
 	signature := make([]byte, 64)
 	r.FillBytes(signature[0:32])
 	s.FillBytes(signature[32:64])

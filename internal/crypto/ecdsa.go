@@ -22,7 +22,10 @@ func Sign(privateKey *ecdsa.PrivateKey, message []byte) ([]byte, error) {
 	hash := sha256.Sum256(message)
 
 	// RFC 6979 deterministic signing (codahale library)
-	r, s := rfc6979.SignECDSA(privateKey, hash[:], sha256.New)
+	r, s, err := rfc6979.SignECDSA(privateKey, hash[:], sha256.New)
+	if err != nil {
+		return nil, fmt.Errorf("RFC 6979 signing failed: %w", err)
+	}
 
 	// BIP-62 low-S normalization
 	curve := privateKey.Curve

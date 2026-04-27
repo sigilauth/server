@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -94,6 +95,11 @@ func (h *PairHandler) Init(w http.ResponseWriter, r *http.Request) {
 	if err := h.pairStore.Create(r.Context(), derivedNonce, clientPubBytes, sessionPictogram, handshakeTTL, approvalTTL); err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create pair")
 		return
+	}
+
+	// Dev mode: Auto-approve if SIGIL_AUTO_APPROVE=1 (bypasses admin approval for testing)
+	if os.Getenv("SIGIL_AUTO_APPROVE") == "1" {
+		_ = h.pairStore.Approve(r.Context(), derivedNonce)
 	}
 
 	expiresAt := time.Now().Add(handshakeTTL)
@@ -183,6 +189,20 @@ func (h *PairHandler) Complete(w http.ResponseWriter, r *http.Request) {
 func (h *PairHandler) AdminApprove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Admin authentication: Bearer token from SIGIL_ADMIN_API_KEY env var
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		writeError(w, http.StatusUnauthorized, "MISSING_AUTH", "Authorization: Bearer <token> required")
+		return
+	}
+
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	adminKey := os.Getenv("SIGIL_ADMIN_API_KEY")
+	if adminKey == "" || token != adminKey {
+		writeError(w, http.StatusForbidden, "INVALID_TOKEN", "Invalid admin API key")
 		return
 	}
 

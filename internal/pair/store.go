@@ -2,7 +2,6 @@ package pair
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"sync"

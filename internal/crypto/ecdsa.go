@@ -3,28 +3,28 @@ package crypto
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
+
+	"github.com/codahale/rfc6979"
 )
 
 // Sign creates an ECDSA signature for the given message using the private key.
 //
-// Returns a fixed 64-byte signature (r || s) with BIP-62 low-S normalization.
-// The message is hashed with SHA-256 before signing.
+// Returns a fixed 64-byte signature (r || s) with RFC 6979 deterministic signing
+// and BIP-62 low-S normalization. The message is hashed with SHA-256 before signing.
 //
-// TODO(SIGIL-RFC6979): Restore RFC 6979 deterministic signing once upstream
-// Go 1.26.x darwin/arm64 hang is resolved. Currently uses crypto/rand.
-// See: https://github.com/golang/go/issues/XXXXX
+// Uses github.com/codahale/rfc6979 for deterministic nonce generation.
+// Guarantees: same private key + message = same signature (no randomness).
 func Sign(privateKey *ecdsa.PrivateKey, message []byte) ([]byte, error) {
 	hash := sha256.Sum256(message)
 
-	// Use crypto/rand for now — RFC 6979 deferred due to Go 1.26.x hang
-	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
+	// RFC 6979 deterministic signing (codahale library)
+	r, s, err := rfc6979.SignECDSA(privateKey, hash[:], sha256.New)
 	if err != nil {
-		return nil, fmt.Errorf("ECDSA signing failed: %w", err)
+		return nil, fmt.Errorf("RFC 6979 signing failed: %w", err)
 	}
 
 	// BIP-62 low-S normalization

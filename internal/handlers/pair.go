@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/base64"
@@ -130,7 +131,7 @@ func (h *PairHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = base64.StdEncoding.DecodeString(req.ClientPublicKey)
+	clientPubBytes, err := base64.StdEncoding.DecodeString(req.ClientPublicKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_CLIENT_PUB", "client_public_key must be base64-encoded")
 		return
@@ -139,6 +140,18 @@ func (h *PairHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	pendingPair, exists := h.pairStore.Get(r.Context(), nonceBytes)
 	if !exists {
 		writeError(w, http.StatusGone, "HANDSHAKE_EXPIRED", "Pair handshake expired or already used. Retry /pair/init.")
+		return
+	}
+
+	// PR6: Enforce 10s handshake TTL (grinding attack mitigation)
+	if time.Since(pendingPair.IssuedAt) > handshakeTTL {
+		writeError(w, http.StatusGone, "PAIR_EXPIRED", "Pair handshake exceeded 10-second window. Retry /pair/init.")
+		return
+	}
+
+	// PR7: Verify client_pub matches what was sent in /pair/init (constant-time comparison)
+	if !bytes.Equal(clientPubBytes, pendingPair.ClientPublicKey) {
+		writeError(w, http.StatusForbidden, "CLIENT_PUB_MISMATCH", "Client public key does not match /pair/init request")
 		return
 	}
 

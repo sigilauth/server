@@ -54,9 +54,10 @@ func Encrypt(recipientPublicKey *ecdsa.PublicKey, plaintext, salt []byte) ([]byt
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	ciphertextAndTag := gcm.Seal(nil, nonce, plaintext, salt)
-
 	ephemeralPublicKeyCompressed := CompressPublicKey(&ephemeralPrivateKey.PublicKey)
+
+	// AAD = ephemeral_public per spec §2.3 (SIGIL-CONV-V1)
+	ciphertextAndTag := gcm.Seal(nil, nonce, plaintext, ephemeralPublicKeyCompressed)
 
 	result := make([]byte, 0, 33+12+len(ciphertextAndTag))
 	result = append(result, ephemeralPublicKeyCompressed...)
@@ -114,7 +115,8 @@ func Decrypt(recipientPrivateKey *ecdsa.PrivateKey, ciphertext, salt []byte) ([]
 		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, nonce, ciphertextAndTag, salt)
+	// AAD = ephemeral_public per spec §2.3 (SIGIL-CONV-V1)
+	plaintext, err := gcm.Open(nil, nonce, ciphertextAndTag, ephemeralPublicKeyCompressed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt: authentication failed or wrong key")
 	}

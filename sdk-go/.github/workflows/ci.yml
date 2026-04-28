@@ -1,0 +1,156 @@
+name: SDK Go CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdk-go/**'
+      - '.github/workflows/sdk-go-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'sdk-go/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: sdk-go/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: sdk-go
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: sdk-go/go.sum
+
+      - name: Run tests
+        working-directory: sdk-go
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Coverage check
+        working-directory: sdk-go
+        run: |
+          # SDK-Go coverage: 90% line / 85% branch (Maren §10)
+          go tool cover -func=coverage.out | \
+            awk '/^total:/ {
+              cov = substr($3, 1, length($3)-1);
+              if (cov < 90.0) {
+                print "Coverage " cov "% below threshold 90%";
+                exit 1;
+              }
+              print "Coverage " cov "% meets threshold";
+            }'
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./sdk-go/coverage.out
+          flags: sdk-go
+          fail_ci_if_error: false
+
+  contract-tests:
+    name: Contract Tests
+    runs-on: ubuntu-latest
+    services:
+      sigil-server:
+        image: ghcr.io/sigilauth/server:latest
+        env:
+          SIGIL_MODE: test
+        ports:
+          - 8443:8443
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: sdk-go/go.sum
+
+      - name: Wait for server
+        run: |
+          timeout 30 bash -c 'until curl -k https://localhost:8443/info; do sleep 1; done'
+
+      - name: Run contract tests
+        working-directory: sdk-go
+        env:
+          SIGIL_URL: https://localhost:8443
+          SIGIL_API_KEY: test_key_12345
+        run: go test -v -tags=contract ./test/contract/...
+
+  tdd-audit:
+    name: TDD Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin main:main || true
+
+      - name: Run TDD audit (SDK subdirectory)
+        working-directory: sdk-go
+        run: bash ../../scripts/tdd-audit.sh origin/main
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: sdk-go/go.sum
+
+      - name: Run govulncheck
+        working-directory: sdk-go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  all-checks:
+    name: All Checks Passed
+    needs: [lint, test, contract-tests, tdd-audit, security]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
+             [[ "${{ needs.contract-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.tdd-audit.result }}" != "success" ]] || \
+             [[ "${{ needs.security.result }}" != "success" ]]; then
+            echo "One or more checks failed"
+            exit 1
+          fi
+          echo "All SDK-Go checks passed!"

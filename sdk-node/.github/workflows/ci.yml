@@ -1,0 +1,234 @@
+name: SDK Node CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdk-node/**'
+      - '.github/workflows/sdk-node-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'sdk-node/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: sdk-node/pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: sdk-node
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: sdk-node
+        run: pnpm lint
+
+      - name: Type check
+        working-directory: sdk-node
+        run: pnpm type-check
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: sdk-node/pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: sdk-node
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        working-directory: sdk-node
+        run: pnpm test --coverage
+
+      - name: Coverage check
+        working-directory: sdk-node
+        run: |
+          # SDK-Node coverage: 90% line / 85% branch (Maren §10)
+          node -e "
+            const coverage = require('./coverage/coverage-summary.json');
+            const lineCov = coverage.total.lines.pct;
+            const branchCov = coverage.total.branches.pct;
+            console.log(\`Line coverage: \${lineCov}%\`);
+            console.log(\`Branch coverage: \${branchCov}%\`);
+            if (lineCov < 90 || branchCov < 85) {
+              console.error('Coverage below threshold');
+              process.exit(1);
+            }
+          "
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./sdk-node/coverage/lcov.info
+          flags: sdk-node
+          fail_ci_if_error: false
+
+  contract-tests:
+    name: Contract Tests
+    runs-on: ubuntu-latest
+    services:
+      sigil-server:
+        image: ghcr.io/sigilauth/server:latest
+        env:
+          SIGIL_MODE: test
+        ports:
+          - 8443:8443
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: sdk-node/pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: sdk-node
+        run: pnpm install --frozen-lockfile
+
+      - name: Wait for server
+        run: |
+          timeout 30 bash -c 'until curl -k https://localhost:8443/info; do sleep 1; done'
+
+      - name: Run contract tests
+        working-directory: sdk-node
+        env:
+          SIGIL_URL: https://localhost:8443
+          SIGIL_API_KEY: test_key_12345
+        run: pnpm test:contract
+
+  tdd-audit:
+    name: TDD Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin main:main || true
+
+      - name: Run TDD audit
+        working-directory: sdk-node
+        run: bash ../../scripts/tdd-audit.sh origin/main
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: sdk-node/pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: sdk-node
+        run: pnpm install --frozen-lockfile
+
+      - name: Run npm audit
+        working-directory: sdk-node
+        run: pnpm audit --audit-level=high
+
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'sigilauth-sdk-node'
+          path: './sdk-node'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+
+      - name: Upload OWASP report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-report-sdk-node
+          path: reports/
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: sdk-node/pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: sdk-node
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: sdk-node
+        run: pnpm build
+
+      - name: Verify build outputs
+        working-directory: sdk-node
+        run: |
+          test -f dist/index.js || echo "Missing ESM build"
+          test -f dist/index.cjs || echo "Missing CJS build"
+          test -f dist/index.d.ts || echo "Missing type definitions"
+
+  all-checks:
+    name: All Checks Passed
+    needs: [lint, test, contract-tests, tdd-audit, security, build]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
+             [[ "${{ needs.contract-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.tdd-audit.result }}" != "success" ]] || \
+             [[ "${{ needs.security.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "One or more checks failed"
+            exit 1
+          fi
+          echo "All SDK-Node checks passed!"

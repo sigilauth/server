@@ -1,0 +1,186 @@
+# Prometheus Alert Rules for Sigil Auth
+#
+# Based on Quinn §5-6 SLOs and security metrics
+# Alerts fire when SLO thresholds are breached
+
+groups:
+  - name: sigil_health
+    interval: 30s
+    rules:
+      # Sigil server down
+      - alert: SigilDown
+        expr: up{job="sigil"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          component: sigil
+        annotations:
+          summary: "Sigil server is down"
+          description: "Sigil server has been unreachable for 3 minutes. SLO: 99.9% uptime."
+
+      # Relay down
+      - alert: RelayDown
+        expr: up{job="relay"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          component: relay
+        annotations:
+          summary: "Relay service is down"
+          description: "Push relay has been unreachable for 3 minutes. SLO: 99.9% uptime."
+
+  - name: sigil_performance
+    interval: 1m
+    rules:
+      # Challenge creation latency p95 > 500ms
+      - alert: ChallengeSlow
+        expr: histogram_quantile(0.95, rate(sigil_challenge_latency_seconds_bucket{phase="create"}[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: sigil
+        annotations:
+          summary: "Challenge creation is slow"
+          description: "p95 challenge creation latency {{ $value }}s exceeds SLO 500ms."
+
+      # Verification latency p95 > 50ms
+      - alert: VerificationSlow
+        expr: histogram_quantile(0.95, rate(sigil_challenge_latency_seconds_bucket{phase="verify"}[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: sigil
+        annotations:
+          summary: "Signature verification is slow"
+          description: "p95 verification latency {{ $value }}s exceeds SLO 50ms."
+
+  - name: sigil_security
+    interval: 1m
+    rules:
+      # Signature verification failures > 1%
+      - alert: HighSignatureFailures
+        expr: |
+          sum(rate(sigil_challenges_total{status="signature_failed"}[5m]))
+          /
+          sum(rate(sigil_challenges_total{status="created"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: sigil
+          security: true
+        annotations:
+          summary: "High signature verification failure rate"
+          description: "Signature failures {{ $value | humanizePercentage }} exceed 1% threshold. Possible attack or key compromise."
+
+      # Replay attempts detected
+      - alert: ReplayAttempts
+        expr: rate(sigil_challenges_total{status="replay_blocked"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: sigil
+          security: true
+        annotations:
+          summary: "Replay attacks detected"
+          description: "{{ $value }} replay attempts per second detected. Investigate immediately."
+
+      # Attestation failures > 5%
+      - alert: HighAttestationFailures
+        expr: |
+          sum(rate(sigil_device_registrations_total{status="attestation_failed"}[5m]))
+          /
+          sum(rate(sigil_device_registrations_total[5m]))
+          > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: sigil
+        annotations:
+          summary: "High attestation failure rate"
+          description: "Attestation failures {{ $value | humanizePercentage }} exceed 5%. Possible emulator/root usage."
+
+  - name: relay_performance
+    interval: 1m
+    rules:
+      # Push delivery degraded < 95%
+      - alert: PushDeliveryDegraded
+        expr: |
+          sum(rate(relay_push_delivery_success_total[5m]))
+          /
+          sum(rate(relay_push_total{status="sent"}[5m]))
+          < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          component: relay
+        annotations:
+          summary: "Push delivery rate degraded"
+          description: "Push delivery {{ $value | humanizePercentage }} below 95% SLO."
+
+      # Push delivery failures > 10% over 5 min
+      - alert: HighPushFailures
+        expr: |
+          sum(rate(relay_push_delivery_failure_total[5m]))
+          /
+          sum(rate(relay_push_total[5m]))
+          > 0.10
+        for: 5m
+        labels:
+          severity: critical
+          component: relay
+        annotations:
+          summary: "High push delivery failure rate"
+          description: "Push failures {{ $value | humanizePercentage }} exceed 10% threshold."
+
+  - name: mpa_health
+    interval: 1m
+    rules:
+      # MPA rejection rate > 30%
+      - alert: HighMPARejections
+        expr: |
+          sum(rate(sigil_mpa_requests_total{status="rejected"}[1h]))
+          /
+          sum(rate(sigil_mpa_requests_total{status=~"approved|rejected"}[1h]))
+          > 0.30
+        for: 30m
+        labels:
+          severity: warning
+          component: sigil
+        annotations:
+          summary: "High MPA rejection rate"
+          description: "MPA rejection rate {{ $value | humanizePercentage }} exceeds 30%. Review policy configuration."
+
+      # MPA timeout rate > 20%
+      - alert: HighMPATimeouts
+        expr: |
+          sum(rate(sigil_mpa_requests_total{status="timeout"}[1h]))
+          /
+          sum(rate(sigil_mpa_requests_total[1h]))
+          > 0.20
+        for: 30m
+        labels:
+          severity: warning
+          component: sigil
+        annotations:
+          summary: "High MPA timeout rate"
+          description: "MPA timeout rate {{ $value | humanizePercentage }} exceeds 20%."
+
+  - name: error_budget
+    interval: 5m
+    rules:
+      # Sigil error budget burn > 10% in 1h
+      - alert: SigilErrorBudgetBurn
+        expr: |
+          (1 - (
+            sum(rate(sigil_http_requests_total{status=~"2.."}[1h]))
+            /
+            sum(rate(sigil_http_requests_total[1h]))
+          )) > 0.001 * 10  # 10% of monthly 0.1% error budget in 1h
+        for: 5m
+        labels:
+          severity: warning
+          component: sigil
+        annotations:
+          summary: "Sigil error budget burning fast"
+          description: "Error budget burn rate {{ $value | humanizePercentage }} exceeds 10% of monthly budget per hour."

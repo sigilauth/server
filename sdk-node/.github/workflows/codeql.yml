@@ -1,0 +1,72 @@
+# CodeQL Security Analysis for TypeScript
+# Copy to: .github/workflows/codeql.yml in sigilauth/web and sigilauth/server (sdk-node)
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze TypeScript
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: +security-extended
+
+      - name: Build
+        run: npm run build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+      # Sigil-specific: Check web security patterns
+      - name: Check security patterns
+        run: |
+          echo "Checking TypeScript security patterns..."
+          
+          # No hardcoded API keys
+          if grep -rE "sgk_(live|test)_[a-f0-9]{64}" --include="*.ts" --include="*.tsx" src/; then
+            echo "::error::Found hardcoded API key."
+            exit 1
+          fi
+          
+          # Check for console.log with sensitive data
+          if grep -rE "console\.(log|debug).*api.?key|secret|mnemonic" --include="*.ts" src/; then
+            echo "::warning::Potential sensitive data in console output."
+          fi
+          
+          # Verify CSP meta tag or helmet usage (for web)
+          if [ -f "src/app.ts" ] || [ -f "src/index.ts" ]; then
+            if ! grep -r "helmet\|Content-Security-Policy" src/; then
+              echo "::warning::CSP not detected. Consider adding helmet or CSP headers."
+            fi
+          fi
+          
+          echo "TypeScript security pattern check passed."

@@ -1,0 +1,82 @@
+# Promtail Configuration for Sigil Auth
+#
+# Scrapes Docker container logs and ships to Loki
+# Parses JSON-structured logs from sigil and relay
+#
+# Usage:
+#   docker run -d \
+#     -v /var/log:/var/log:ro \
+#     -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
+#     -v $(pwd)/deploy/observability/loki:/etc/promtail:ro \
+#     --network sigil-network \
+#     grafana/promtail
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Scrape all Docker containers
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # Only scrape sigil-network containers
+      - source_labels: [__meta_docker_network_name]
+        regex: sigil-internal
+        action: keep
+
+      # Extract container name
+      - source_labels: [__meta_docker_container_name]
+        regex: /(.*)
+        target_label: container
+
+      # Extract container ID
+      - source_labels: [__meta_docker_container_id]
+        target_label: container_id
+
+      # Extract image name
+      - source_labels: [__meta_docker_container_image]
+        target_label: image
+
+      # Service label from compose
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+
+    # Parse JSON logs
+    pipeline_stages:
+      # Try to parse as JSON
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            error: error
+            trace_id: trace_id
+            span_id: span_id
+            component: component
+            operation: operation
+
+      # Extract timestamp if present
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      # Extract log level
+      - labels:
+          level:
+          component:
+          operation:
+
+      # Drop healthcheck spam (optional)
+      - match:
+          selector: '{operation="healthcheck"}'
+          action: drop

@@ -1,0 +1,67 @@
+# Prometheus Configuration for Sigil Auth
+#
+# Scrapes metrics from sigil and relay services
+# Configured alert rules per Quinn §5-6 SLOs
+#
+# Usage:
+#   docker run -d \
+#     -p 9090:9090 \
+#     -v $(pwd)/deploy/observability/prometheus:/etc/prometheus:ro \
+#     --network sigil-network \
+#     prom/prometheus
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'sigil-mvp'
+    environment: 'production'
+
+# Alert rule files
+rule_files:
+  - 'alerts.yml'
+
+# Scrape configurations
+scrape_configs:
+  # Sigil Server metrics
+  - job_name: 'sigil'
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true  # Self-signed cert in dev
+    static_configs:
+      - targets: ['sigil:8443']
+        labels:
+          service: 'sigil-server'
+          component: 'auth'
+
+    # Scrape /metrics endpoint
+    metrics_path: /metrics
+
+    # Scrape interval (can override global)
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Push Relay metrics
+  - job_name: 'relay'
+    scheme: http
+    static_configs:
+      - targets: ['relay:8080']
+        labels:
+          service: 'sigil-relay'
+          component: 'push'
+
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # PostgreSQL exporter (optional)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    # Only if postgres_exporter sidecar is deployed
+    honor_labels: true

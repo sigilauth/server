@@ -1,0 +1,91 @@
+# Production Environment Overrides
+#
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+#        OR: make prod
+#
+# Changes from base:
+# - Resource limits enforced
+# - Named volumes for persistence
+# - Healthchecks tuned for production
+# - Attestation required
+# - No emulators allowed
+# - TLS from Let's Encrypt or provided certs
+
+version: '3.8'
+
+services:
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    volumes:
+      - postgres-prod-data:/var/lib/postgresql/data
+
+  relay:
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    environment:
+      # Production push providers (require real credentials)
+      APNS_MOCK: "false"
+      FCM_MOCK: "false"
+
+      # Logging
+      LOG_LEVEL: info
+
+    # TLS termination via reverse proxy (Caddy or nginx)
+    # See deploy/caddy/Caddyfile or deploy/nginx/nginx.conf
+
+  sigil:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+    environment:
+      # Production mode
+      SIGIL_MODE: operational
+
+      # Mnemonic from file or Key Vault (NEVER env var in production)
+      SIGIL_MNEMONIC: ""  # Unset
+      SIGIL_MNEMONIC_PATH: /var/lib/sigil/mnemonic.txt
+
+      # Attestation required in production
+      SIGIL_ATTESTATION_REQUIRED: "true"
+      SIGIL_ALLOW_EMULATORS: "false"
+
+      # TLS from ACME or provided
+      TLS_AUTO_GENERATE: "false"  # Use ACME or provided certs
+
+      # Logging
+      LOG_LEVEL: info
+
+    volumes:
+      - sigil-prod-data:/var/lib/sigil
+      # Mount ACME certs from host
+      - ./certs:/var/lib/sigil/tls:ro
+
+    healthcheck:
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres-prod-data:
+    name: sigil-postgres-prod
+  sigil-prod-data:
+    name: sigil-server-prod

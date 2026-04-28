@@ -1,0 +1,158 @@
+name: Quarantined Tests
+
+# This workflow runs tests that are known to be flaky
+# It runs on every PR but does NOT block merging
+# Failures create issues for tracking
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  quarantined-tests:
+    name: Run Quarantined Tests
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Don't fail the workflow
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run quarantined tests
+        id: test
+        continue-on-error: true
+        run: |
+          # Run tests tagged as 'flaky' or in quarantine list
+          go test -v -tags=quarantined ./... > test-output.log 2>&1
+          TEST_EXIT_CODE=$?
+          cat test-output.log
+          exit $TEST_EXIT_CODE
+
+      - name: Create issue on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const testOutput = fs.readFileSync('test-output.log', 'utf8');
+
+            // Check if an issue already exists for this flake
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['flaky-test', 'quarantined'],
+              state: 'open'
+            });
+
+            // Only create issue if none exists
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Quarantined test failed in PR #${context.issue.number}`,
+                body: `## Quarantined Test Failure
+
+                A quarantined test failed in PR #${context.issue.number}.
+
+                **This does NOT block merging** but should be investigated.
+
+                **Test output:**
+                \`\`\`
+                ${testOutput.slice(0, 10000)}
+                \`\`\`
+
+                **Next steps:**
+                1. Investigate the root cause
+                2. Fix the flaky test
+                3. Remove from quarantine once stable for 24h
+                4. If not fixed within 24h, delete the test
+
+                **Flaky test policy:** Zero tolerance. Fix within 24h or delete (Maren §9).
+                `,
+                labels: ['flaky-test', 'quarantined', 'P1']
+              });
+            }
+
+      - name: Update existing issue
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['flaky-test', 'quarantined'],
+              state: 'open'
+            });
+
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Still failing as of ${new Date().toISOString()}`
+              });
+            }
+
+      - name: Report success
+        if: success()
+        run: |
+          echo "✓ All quarantined tests passed!"
+          echo "Consider promoting stable tests back to main suite"
+
+  check-quarantine-age:
+    name: Check Quarantine Age
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for stale quarantined tests
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['flaky-test', 'quarantined'],
+              state: 'open'
+            });
+
+            const now = new Date();
+            const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+            for (const issue of issues.data) {
+              const createdAt = new Date(issue.created_at);
+              const age = now - createdAt;
+
+              if (age > maxAge) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `⚠️ **24-hour deadline exceeded**
+
+                  This quarantined test has been flaky for more than 24 hours.
+
+                  **Action required:** Either fix the test immediately or delete it.
+
+                  Zero tolerance for flaky tests (Maren §9).`
+                });
+
+                // Add high priority label
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['P0', 'immediate-action-required']
+                });
+              }
+            }

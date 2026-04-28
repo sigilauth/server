@@ -1,0 +1,45 @@
+# Caddy TLS Termination for Sigil Relay
+#
+# Automatic ACME (Let's Encrypt) certificates
+# No manual certificate management required
+#
+# Usage:
+#   docker run -d \
+#     -p 80:80 \
+#     -p 443:443 \
+#     -v $(pwd)/deploy/Caddyfile:/etc/caddy/Caddyfile:ro \
+#     -v caddy-data:/data \
+#     -v caddy-config:/config \
+#     --network sigil-network \
+#     caddy:alpine
+
+# Relay (automatic HTTPS)
+relay.sigilauth.com {
+    reverse_proxy relay:8080
+
+    # Headers
+    header Strict-Transport-Security "max-age=63072000"
+
+    # Logging
+    log {
+        output stdout
+        format json
+    }
+
+    # Rate limiting (optional)
+    @limited {
+        path /devices/register
+    }
+    rate_limit @limited 10r/m
+
+    # Health check endpoint
+    handle /health {
+        reverse_proxy relay:8080
+    }
+}
+
+# Self-signed for development (use `caddy run --config Caddyfile.dev`)
+:8443 {
+    reverse_proxy relay:8080
+    tls internal  # Self-signed certificate
+}
